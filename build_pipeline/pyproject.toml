@@ -1,0 +1,29 @@
+[project]
+name = "coderllm-build"
+version = "0.1.0"
+description = "Build pipeline: download base model, convert to MLX + GGUF (Unsloth Dynamic 2.0), package for LM Studio, upload to Hugging Face."
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "huggingface_hub>=0.25",
+    "pyyaml>=6.0",
+    "mlx-lm>=0.19 ; sys_platform == 'darwin'",
+    "sentencepiece>=0.2",
+    "protobuf>=4.25",
+    "transformers>=4.46",
+    "safetensors>=0.4",
+    "torch>=2.4",
+    "numpy>=1.26",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+coderllm-build = "build.cli:app"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["build*"]

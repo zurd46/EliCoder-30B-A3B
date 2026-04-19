@@ -1,0 +1,53 @@
+model_name: coder-16b-dyn
+display_name: CoderLLM 16B Dynamic
+base:
+  hf_repo: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  revision: main
+  license: apache-2.0
+
+gguf_quants:
+  - id: UD-Q4_K_XL
+    llama_cpp_type: Q4_K_M
+    imatrix: true
+    priority: 1
+    expected_size_gb: 17.7
+    description: "Default quality profile (Unsloth Dynamic 2.0 style)"
+  - id: UD-Q3_K_XL
+    llama_cpp_type: Q3_K_L
+    imatrix: true
+    priority: 2
+    expected_size_gb: 13.8
+    description: "Long-context profile — more KV budget"
+  - id: UD-IQ2_M
+    llama_cpp_type: IQ2_M
+    imatrix: true
+    priority: 3
+    expected_size_gb: 10.8
+    description: "Aggressive size — fits 16GB class hardware"
+
+mlx_quants:
+  - id: mlx-4bit
+    bits: 4
+    group_size: 64
+    expected_size_gb: 16.5
+    description: "MLX 4-bit, Apple Silicon speed variant"
+  - id: mlx-3bit
+    bits: 3
+    group_size: 64
+    expected_size_gb: 12.8
+    description: "MLX 3-bit for tighter memory"
+
+hf_upload:
+  owner: zurd46
+  repo_prefix: coder-16b-dyn
+  private: false
+  default_tags:
+    - code
+    - coder
+    - qwen3
+    - mlx
+    - gguf
+    - lm-studio
+    - mac
+    - windows
+    - apple-silicon

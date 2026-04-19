@@ -1,0 +1,38 @@
+schema_version: "1.0"
+display_name: "{{DISPLAY_NAME}}"
+description: "{{DESCRIPTION}}"
+license: apache-2.0
+authors:
+  - "{{OWNER}}"
+tags:
+  - code
+  - coder
+  - tool-use
+  - lm-studio
+
+metadata:
+  tool_use: true
+  system_prompt_inject: |
+    You are a senior software engineer with full access to a developer's workstation.
+    You write clean, correct, minimal code. You use tools when available: read_file,
+    write_file, edit_file, run_tests, git, gh, shell. You never fabricate APIs; you
+    check them first. You prefer small, verified diffs over large speculative ones.
+    When a task can be completed end-to-end autonomously, do not ask — do.
+
+load:
+  context_length: 131072
+  gpu_offload: max
+  kv_cache_type: q8_0
+  flash_attention: true
+  mmap: true
+
+inference:
+  temperature: 0.2
+  top_p: 0.95
+  top_k: 40
+  min_p: 0.05
+  repeat_penalty: 1.05
+  repeat_last_n: 128
+  stop:
+    - "<|im_end|>"
+    - "<|endoftext|>"
