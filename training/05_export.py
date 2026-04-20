@@ -77,6 +77,15 @@ def _bootstrap(pip_extras):
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pip_extras], check=False)
 
 _bootstrap(["unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git", "transformers>=4.46", "peft>=0.13", "accelerate>=1.0", "huggingface_hub>=0.25"])
+# %% [markdown]
+# ## Unsloth Telemetry-Patch
+
+# %%
+import unsloth.models._utils as _u
+_u._get_statistics = lambda *a, **kw: None
+_u.time_limited_stats_check = lambda *a, **kw: None
+print("unsloth stats patched")
+
 # %%
 import os, torch, shutil
 from pathlib import Path

@@ -71,6 +71,17 @@ def _bootstrap(pip_extras):
     subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pip_extras], check=False)
 
 _bootstrap(["unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git", "trl>=0.12", "transformers>=4.46", "datasets>=3.0", "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml"])
+# %% [markdown]
+# ## Unsloth Telemetry-Patch
+# Unsloth 2026.4.6 ruft beim Model-Load einen HF-Stats-Endpoint, der in Colab
+# regelmäßig 120s hängt. Dieses Patch no-op't die Calls *vor* dem Unsloth-Import.
+
+# %%
+import unsloth.models._utils as _u
+_u._get_statistics = lambda *a, **kw: None
+_u.time_limited_stats_check = lambda *a, **kw: None
+print("unsloth stats patched")
+
 # %%
 import os, yaml, torch
 from pathlib import Path
