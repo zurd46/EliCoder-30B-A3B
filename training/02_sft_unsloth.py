@@ -50,10 +50,14 @@ def _bootstrap(pip_extras):
             effective_url = repo_url.replace("https://", f"https://x-access-token:{gh_tok}@", 1)
             print("using GitHub token for private repo clone")
 
-        if not repo_dir.exists():
-            print(f"cloning {repo_url} -> {repo_dir}")
-            res = subprocess.run(["git", "clone", "--depth", "1", effective_url, str(repo_dir)])
-            if res.returncode != 0:
+        import shutil
+        if repo_dir.exists():
+            print(f"removing stale clone at {repo_dir}")
+            shutil.rmtree(repo_dir)
+        print(f"cloning {repo_url} -> {repo_dir}")
+        res = subprocess.run(["git", "clone", "--depth", "1", effective_url, str(repo_dir)])
+        if res.returncode != 0:
+            if True:
                 print("=" * 70)
                 print(f"git clone FAILED for {repo_url}")
                 print()
