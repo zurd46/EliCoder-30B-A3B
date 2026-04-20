@@ -14,6 +14,7 @@ class GGUFQuant:
     priority: int
     expected_size_gb: float
     description: str
+    prebuilt_file: str | None = None
 
 
 @dataclass

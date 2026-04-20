@@ -9,6 +9,7 @@ from .convert_gguf import convert_gguf, cleanup_f16
 from .lm_studio import package_gguf, package_mlx
 from .upload import upload_variant, upload_all, whoami
 from . import auto as auto_mod
+from .prebuilt import fetch_prebuilt
 
 app = typer.Typer(add_completion=False, help="CoderLLM build pipeline — download, quantize, package, upload.")
 console = Console()
@@ -84,12 +85,25 @@ def cmd_detect(target_ctx: int = typer.Option(32768, "--ctx", help="planned cont
     auto_mod.print_plan(h, target_ctx)
 
 
+@app.command("fetch-prebuilt")
+def cmd_fetch_prebuilt(
+    kind: str = typer.Option(..., "--kind", help="gguf | mlx"),
+    variant: str = typer.Option(..., "--variant"),
+    force: bool = False,
+):
+    fetch_prebuilt(kind, variant, force=force)
+
+
 @app.command("auto")
 def cmd_auto(
     target_ctx: int = typer.Option(32768, "--ctx", help="planned context length"),
     upload: bool = typer.Option(False, help="also upload the picked variant(s) to HF"),
     private: bool = typer.Option(None),
     yes: bool = typer.Option(False, "--yes", "-y", help="skip confirmation"),
+    build_from_source: bool = typer.Option(
+        False, "--build-from-source",
+        help="force conversion from base BF16 instead of downloading prebuilt quants",
+    ),
 ):
     host = auto_mod.detect()
     picks = auto_mod.print_plan(host, target_ctx)
@@ -101,14 +115,32 @@ def cmd_auto(
         if ok and ok not in ("y", "yes", "j", "ja"):
             raise typer.Exit(0)
 
-    download_base()
-    for kind, vid in picks:
-        if kind == "mlx":
-            convert_mlx(quant_id=vid)
-            package_mlx(variant_id=vid)
-        else:
-            convert_gguf(quant_id=vid)
-            package_gguf(variant_id=vid)
+    if not build_from_source:
+        console.print("[bold]Strategy:[/] prebuilt-first (fast, community-quality)")
+        for kind, vid in picks:
+            try:
+                fetch_prebuilt(kind, vid)
+            except Exception as e:
+                console.print(f"[yellow]Prebuilt unavailable for {kind}:{vid} ({e}) — falling back to source build[/]")
+                download_base()
+                if kind == "mlx":
+                    convert_mlx(quant_id=vid)
+                else:
+                    convert_gguf(quant_id=vid)
+            if kind == "mlx":
+                package_mlx(variant_id=vid)
+            else:
+                package_gguf(variant_id=vid)
+    else:
+        console.print("[bold]Strategy:[/] build-from-source (slow, for fine-tuned bases)")
+        download_base()
+        for kind, vid in picks:
+            if kind == "mlx":
+                convert_mlx(quant_id=vid)
+                package_mlx(variant_id=vid)
+            else:
+                convert_gguf(quant_id=vid)
+                package_gguf(variant_id=vid)
 
     if upload:
         for kind, vid in picks:

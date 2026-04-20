@@ -5,25 +5,36 @@ base:
   revision: main
   license: apache-2.0
 
+prebuilt:
+  gguf_repo: unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
+  mlx_repos:
+    mlx-8bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit
+    mlx-6bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit
+    mlx-4bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
+    mlx-3bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-3bit
+
 gguf_quants:
   - id: UD-Q4_K_XL
     llama_cpp_type: Q4_K_M
     imatrix: true
     priority: 1
     expected_size_gb: 17.7
-    description: "Default quality profile (Unsloth Dynamic 2.0 style)"
+    description: "Default quality profile (Unsloth Dynamic 2.0)"
+    prebuilt_file: Qwen3-Coder-30B-A3B-Instruct-UD-Q4_K_XL.gguf
   - id: UD-Q3_K_XL
     llama_cpp_type: Q3_K_L
     imatrix: true
     priority: 2
     expected_size_gb: 13.8
     description: "Long-context profile — more KV budget"
+    prebuilt_file: Qwen3-Coder-30B-A3B-Instruct-UD-Q3_K_XL.gguf
   - id: UD-IQ2_M
     llama_cpp_type: IQ2_M
     imatrix: true
     priority: 3
     expected_size_gb: 10.8
     description: "Aggressive size — fits 16GB class hardware"
+    prebuilt_file: Qwen3-Coder-30B-A3B-Instruct-UD-IQ2_M.gguf
 
 mlx_quants:
   - id: mlx-4bit

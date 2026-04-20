@@ -141,8 +141,10 @@ def _mac_precise_memory() -> tuple[float | None, float | None]:
         speculative = pages.get("Pages speculative", 0)
         purgeable = pages.get("Pages purgeable", 0)
         file_backed = pages.get("File-backed pages", 0)
-        avail_bytes = (free + inactive + speculative + purgeable + file_backed) * page_size
+        avail_bytes = (free + inactive + speculative + purgeable) * page_size
         avail = avail_bytes / 1024**3
+        if total is not None and avail > total:
+            avail = total * 0.95
     except Exception:
         pass
     return total, avail
