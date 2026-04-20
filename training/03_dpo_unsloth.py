@@ -24,7 +24,7 @@ def _bootstrap(pip_extras):
     if in_colab:
         try:
             from google.colab import userdata
-            for key in ("HF_TOKEN", "HUGGINGFACE_TOKEN"):
+            for key in ("HF_TOKEN", "HUGGINGFACE_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
                 v = userdata.get(key)
                 if v:
                     os.environ[key] = v
@@ -36,9 +36,15 @@ def _bootstrap(pip_extras):
         except Exception:
             pass
 
+        gh_tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        effective_url = repo_url
+        if gh_tok and repo_url.startswith("https://github.com/"):
+            effective_url = repo_url.replace("https://", f"https://x-access-token:{gh_tok}@", 1)
+            print("using GitHub token for private repo clone")
+
         if not repo_dir.exists():
             print(f"cloning {repo_url} -> {repo_dir}")
-            res = subprocess.run(["git", "clone", "--depth", "1", repo_url, str(repo_dir)])
+            res = subprocess.run(["git", "clone", "--depth", "1", effective_url, str(repo_dir)])
             if res.returncode != 0:
                 print("=" * 70)
                 print(f"git clone FAILED for {repo_url}")
