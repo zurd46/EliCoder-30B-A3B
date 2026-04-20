@@ -73,6 +73,15 @@ def _bootstrap(pip_extras):
 
 _bootstrap(["unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git", "trl>=0.12", "transformers>=4.46", "datasets>=3.0", "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml"])
 # %% [markdown]
+# ## GPU-Sanity-Check
+
+# %%
+import torch
+assert torch.cuda.is_available(), "CUDA not available — switch runtime to H100/A100 GPU"
+print(f"OK: {torch.cuda.get_device_name(0)}  "
+      f"({torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB)")
+
+# %% [markdown]
 # ## Unsloth Telemetry-Patch
 
 # %%
