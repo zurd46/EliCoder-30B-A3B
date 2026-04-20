@@ -35,6 +35,11 @@ training:
   save_steps: 500
   save_total_limit: 3
   seed: 42
+  dataset_num_proc: 4
+  packing: false
+  remove_unused_columns: false
+  eval_strategy: "no"
+  dataloader_pin_memory: false
 
 output:
   hf_repo: zurd46/coder-16b-dyn-lora-sft
