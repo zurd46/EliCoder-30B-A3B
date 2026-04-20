@@ -120,19 +120,55 @@ TOK = os.environ["HF_TOKEN"]
 CFG = yaml.safe_load(Path("configs/sft.yaml").read_text())
 
 # %% [markdown]
-# ## GPU sauber machen — falls vorheriger Run fragmentiert hat
+# ## GPU aggressiv sauber machen — killt alte Training-Objekte aus vorigem Run
 
 # %%
-import gc
-gc.collect()
+import gc, sys
+
+# 1. Alle bekannten CUDA-bindenden Variablen aus globals entfernen
+_to_drop = [
+    "model", "tokenizer", "trainer", "ds", "args", "optimizer", "scheduler",
+    "lr_scheduler", "accelerator", "bnb_config", "lora_cfg", "inputs", "outputs",
+]
+for _n in _to_drop:
+    globals().pop(_n, None)
+
+# 2. Jedes nn.Module auf CPU schieben + referenz löschen
+for _n in list(globals().keys()):
+    if _n.startswith("_"):
+        continue
+    try:
+        _o = globals()[_n]
+    except Exception:
+        continue
+    if isinstance(_o, torch.nn.Module):
+        try:
+            _o.cpu()
+        except Exception:
+            pass
+        del globals()[_n]
+
+# 3. GC mehrfach — PyTorch hält teils zyklische Referenzen
+for _ in range(3):
+    gc.collect()
+
+# 4. PyTorch-Allocator-Reset
 torch.cuda.empty_cache()
+torch.cuda.ipc_collect()
+torch.cuda.synchronize()
+torch.cuda.reset_peak_memory_stats()
+
 free_gb = torch.cuda.mem_get_info()[0] / 1024**3
 total_gb = torch.cuda.mem_get_info()[1] / 1024**3
-print(f"GPU free: {free_gb:.1f} / {total_gb:.1f} GB")
-assert free_gb > 40, (
-    f"GPU has only {free_gb:.1f} GB free — RESTART RUNTIME "
-    "(Runtime → Disconnect and delete runtime), then rerun all cells."
-)
+print(f"GPU free after cleanup: {free_gb:.1f} / {total_gb:.1f} GB")
+
+if free_gb < 40:
+    import os, time
+    print(f"OOM-Residue detected: {free_gb:.1f} GB free, {total_gb - free_gb:.1f} GB stuck.")
+    print("KILLING KERNEL to force clean restart — Colab reconnects automatisch.")
+    print("Nach Reconnect einfach nochmal 'Run all' drücken.")
+    time.sleep(2)
+    os._exit(0)
 
 # %%
 model, tokenizer = FastLanguageModel.from_pretrained(
