@@ -3,6 +3,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+for envfile in .env ../.env; do
+    if [ -f "$envfile" ]; then
+        set -a
+        # shellcheck disable=SC1090
+        source "$envfile"
+        set +a
+        echo "[env] loaded $envfile"
+    fi
+done
+
 if [ ! -d ".venv" ]; then
     echo "[setup] creating venv"
     python3 -m venv .venv

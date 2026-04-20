@@ -27,8 +27,36 @@
 # ## Long-Context
 # Eigene synthetische Needle-in-Haystack-Samples (32k–200k).
 
+# %% [markdown]
+# ## Colab Bootstrap — einmal pro Runtime
+
 # %%
-# !pip install -q "datasets>=3.0" "huggingface_hub>=0.25" tqdm
+def _bootstrap():
+    import os, subprocess, sys
+    from pathlib import Path
+    try:
+        import google.colab
+        in_colab = True
+    except Exception:
+        in_colab = False
+    if in_colab:
+        try:
+            from google.colab import userdata
+            tok = userdata.get("HF_TOKEN")
+            if tok:
+                os.environ["HF_TOKEN"] = tok
+                os.environ["HUGGING_FACE_HUB_TOKEN"] = tok
+        except Exception:
+            pass
+        root = Path("/content/CoderLLM")
+        if not root.exists():
+            subprocess.run(["git", "clone", "--depth", "1",
+                            "https://github.com/zurd46/CoderLLM.git", str(root)], check=True)
+        os.chdir(root / "training")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                    "datasets>=3.0", "huggingface_hub>=0.25", "tqdm"], check=False)
+
+_bootstrap()
 
 # %%
 import os, json, random, re

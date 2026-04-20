@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from pathlib import Path
 from rich.console import Console
 from huggingface_hub import snapshot_download, hf_hub_download
@@ -7,6 +8,50 @@ from .config import load
 from .paths import CACHE_DIR, GGUF_DIR, MLX_DIR, ensure_dirs
 
 console = Console()
+
+
+def _load_dotenv() -> None:
+    from .paths import ROOT
+    for candidate in (ROOT / ".env", Path.cwd() / ".env"):
+        if not candidate.exists():
+            continue
+        try:
+            for line in candidate.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip().lstrip("export ").strip()
+                v = v.strip().strip('"').strip("'")
+                if k and v and k not in os.environ:
+                    os.environ[k] = v
+        except Exception:
+            continue
+
+
+def _token() -> str | None:
+    _load_dotenv()
+    for var in ("HF_TOKEN", "HUGGINGFACE_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        t = os.environ.get(var)
+        if t:
+            return t.strip()
+    path = Path.home() / ".cache" / "huggingface" / "token"
+    if path.exists():
+        try:
+            return path.read_text().strip() or None
+        except Exception:
+            return None
+    return None
+
+
+def _announce_auth() -> str | None:
+    t = _token()
+    if t:
+        masked = t[:4] + "…" + t[-4:] if len(t) > 8 else "***"
+        console.print(f"[green]HF auth:[/] token present ({masked}, {len(t)} chars)")
+    else:
+        console.print("[yellow]HF auth:[/] no token found — downloads will be slower / rate-limited")
+    return t
 
 
 def fetch_prebuilt_mlx(variant_id: str, force: bool = False) -> Path:
@@ -24,6 +69,7 @@ def fetch_prebuilt_mlx(variant_id: str, force: bool = False) -> Path:
         return target
 
     target.mkdir(parents=True, exist_ok=True)
+    tok = _announce_auth()
     console.print(f"[bold cyan]Downloading prebuilt MLX[/] {repo}")
     snapshot_download(
         repo_id=repo,
@@ -32,6 +78,7 @@ def fetch_prebuilt_mlx(variant_id: str, force: bool = False) -> Path:
         allow_patterns=["*.safetensors", "*.json", "tokenizer*", "chat_template*",
                         "special_tokens_map*", "added_tokens.json", "README.md", "LICENSE*"],
         max_workers=4,
+        token=tok,
     )
     console.print(f"[green]Prebuilt MLX ready[/] \u2192 {target}")
     return target
@@ -55,12 +102,14 @@ def fetch_prebuilt_gguf(variant_id: str, force: bool = False) -> Path:
         console.print(f"[yellow]Prebuilt GGUF {variant_id} already present at[/] {target}")
         return target
 
+    tok = _announce_auth()
     console.print(f"[bold cyan]Downloading prebuilt GGUF[/] {repo}/{q.prebuilt_file}")
     path = hf_hub_download(
         repo_id=repo,
         filename=q.prebuilt_file,
         cache_dir=str(CACHE_DIR),
         local_dir=str(GGUF_DIR),
+        token=tok,
     )
     final = Path(path)
     if final != target:
