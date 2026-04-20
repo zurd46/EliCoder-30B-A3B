@@ -115,9 +115,6 @@ os.environ["WANDB_NAME"] = "sft-phase-a"
 
 import yaml, torch
 from pathlib import Path
-from datasets import load_dataset
-from unsloth import FastLanguageModel
-from trl import SFTTrainer, SFTConfig
 
 TOK = os.environ["HF_TOKEN"]
 
@@ -173,6 +170,14 @@ if free_gb < 40:
     print("Nach Reconnect einfach nochmal 'Run all' drücken.")
     time.sleep(2)
     os._exit(0)
+
+# %% [markdown]
+# ## Heavy imports — erst nach Cleanup, damit Kernel-Kill nichts verschwendet
+
+# %%
+from datasets import load_dataset
+from unsloth import FastLanguageModel
+from trl import SFTTrainer, SFTConfig
 
 # %%
 model, tokenizer = FastLanguageModel.from_pretrained(
