@@ -85,7 +85,8 @@ print("unsloth stats patched")
 # %%
 import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
-os.environ["WANDB_PROJECT"] = "coder-16b-dyn"
+os.environ["WANDB_PROJECT"] = "CoderLLM"
+os.environ["WANDB_NAME"] = "sft-phase-a"
 
 import yaml, torch
 from pathlib import Path

@@ -83,7 +83,12 @@ _u.time_limited_stats_check = lambda *a, **kw: None
 print("unsloth stats patched")
 
 # %%
-import os, yaml, torch
+import os
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["WANDB_PROJECT"] = "CoderLLM"
+os.environ["WANDB_NAME"] = "longctx-phase-c"
+
+import yaml, torch
 from pathlib import Path
 from datasets import load_dataset
 from unsloth import FastLanguageModel
