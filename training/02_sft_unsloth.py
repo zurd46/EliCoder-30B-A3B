@@ -5,6 +5,15 @@
 # Dauer: ~12 h (Unsloth macht ~2× vanilla).
 
 # %% [markdown]
+# ## Env-Flags — MÜSSEN als allererstes gesetzt werden (vor jedem torch-Import)
+
+# %%
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["CUDA_DEVICE_MAX_CONNECTIONS"] = "1"
+
+# %% [markdown]
 # ## Colab Bootstrap
 
 # %%
