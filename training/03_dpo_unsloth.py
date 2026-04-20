@@ -9,36 +9,63 @@
 # ## Colab Bootstrap
 
 # %%
-def _bootstrap():
+def _bootstrap(pip_extras):
     import os, subprocess, sys
     from pathlib import Path
     try:
-        import google.colab
+        import google.colab  # noqa: F401
         in_colab = True
     except Exception:
         in_colab = False
+
+    repo_url = os.environ.get("CODERLLM_REPO_URL", "https://github.com/zurd46/CoderLLM.git")
+    repo_dir = Path(os.environ.get("CODERLLM_DIR", "/content/CoderLLM"))
+
     if in_colab:
         try:
             from google.colab import userdata
-            tok = userdata.get("HF_TOKEN")
-            if tok:
-                os.environ["HF_TOKEN"] = tok
-                os.environ["HUGGING_FACE_HUB_TOKEN"] = tok
+            for key in ("HF_TOKEN", "HUGGINGFACE_TOKEN"):
+                v = userdata.get(key)
+                if v:
+                    os.environ[key] = v
+            if os.environ.get("HF_TOKEN"):
+                os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", os.environ["HF_TOKEN"])
+                print("HF_TOKEN loaded from Colab Secrets")
+            else:
+                print("WARN: HF_TOKEN not found in Colab Secrets — add it before proceeding")
         except Exception:
             pass
-        root = Path("/content/CoderLLM")
-        if not root.exists():
-            subprocess.run(["git", "clone", "--depth", "1",
-                            "https://github.com/zurd46/CoderLLM.git", str(root)], check=True)
-        os.chdir(root / "training")
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q",
-                    "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git",
-                    "trl>=0.12", "transformers>=4.46", "datasets>=3.0",
-                    "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml"],
-                   check=False)
 
-_bootstrap()
+        if not repo_dir.exists():
+            print(f"cloning {repo_url} -> {repo_dir}")
+            res = subprocess.run(["git", "clone", "--depth", "1", repo_url, str(repo_dir)])
+            if res.returncode != 0:
+                print("=" * 70)
+                print(f"git clone FAILED for {repo_url}")
+                print()
+                print("Wahrscheinliche Ursachen:")
+                print("  1. Repo existiert noch nicht auf GitHub")
+                print("  2. Repo ist privat (braucht Token im URL)")
+                print()
+                print("Fixes:")
+                print("  A) Repo pushen — lokal auf deinem Mac:")
+                print("       cd CoderLLM")
+                print("       gh repo create zurd46/CoderLLM --public --source=. --push")
+                print()
+                print("  B) Privates Repo: setze CODERLLM_REPO_URL vor dem Run, z.B.:")
+                print("       import os")
+                print("       os.environ['CODERLLM_REPO_URL'] = 'https://TOKEN@github.com/zurd46/CoderLLM.git'")
+                print()
+                print("  C) Anderer Namespace: setze CODERLLM_REPO_URL auf dein Repo")
+                print("=" * 70)
+                raise RuntimeError("repo clone failed — see instructions above")
 
+        os.chdir(repo_dir / "training")
+        print(f"cwd = {repo_dir / 'training'}")
+
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pip_extras], check=False)
+
+_bootstrap(["unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git", "trl>=0.12", "transformers>=4.46", "datasets>=3.0", "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml"])
 # %%
 import os, yaml, torch
 from pathlib import Path
