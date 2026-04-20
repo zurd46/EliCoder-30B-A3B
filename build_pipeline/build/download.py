@@ -8,16 +8,36 @@ from .paths import BASE_DIR, CACHE_DIR, ensure_dirs
 console = Console()
 
 
+def _is_complete(target: Path) -> bool:
+    if not target.exists():
+        return False
+    safetensors = list(target.glob("*.safetensors"))
+    index = target / "model.safetensors.index.json"
+    if not safetensors:
+        return False
+    if index.exists():
+        import json
+        try:
+            manifest = json.loads(index.read_text())
+            expected = set(manifest.get("weight_map", {}).values())
+            present = {p.name for p in safetensors}
+            if not expected.issubset(present):
+                return False
+        except Exception:
+            return False
+    return True
+
+
 def download_base(force: bool = False) -> Path:
     ensure_dirs()
     cfg = load()
     target = BASE_DIR / cfg.base_repo.replace("/", "__")
 
-    if target.exists() and any(target.iterdir()) and not force:
-        console.print(f"[yellow]Base already present at[/] {target}")
+    if _is_complete(target) and not force:
+        console.print(f"[green]Base already complete at[/] {target}")
         return target
 
-    console.print(f"[bold cyan]Downloading[/] {cfg.base_repo}@{cfg.base_revision}")
+    console.print(f"[bold cyan]Downloading[/] {cfg.base_repo}@{cfg.base_revision}  (resume-capable)")
     snapshot_download(
         repo_id=cfg.base_repo,
         revision=cfg.base_revision,
@@ -36,8 +56,16 @@ def download_base(force: bool = False) -> Path:
             "README.md",
             "LICENSE*",
         ],
+        max_workers=4,
     )
-    console.print(f"[green]Base ready at[/] {target}")
+
+    if not _is_complete(target):
+        raise RuntimeError(
+            f"Download finished but base is still incomplete at {target}. "
+            "Re-run `coderllm-build download` to resume."
+        )
+
+    console.print(f"[green]Base complete at[/] {target}")
     return target
 
 

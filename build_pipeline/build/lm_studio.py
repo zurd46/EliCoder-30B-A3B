@@ -65,8 +65,8 @@ def package_mlx(variant_id: str | None = None, force: bool = False) -> list[Path
             raise ValueError(f"Unknown MLX variant {qid}")
 
         src = MLX_DIR / f"{cfg.model_name}-{qid}"
-        if not src.exists():
-            console.print(f"[yellow]Skip {qid}: MLX dir missing ({src})[/]")
+        if not src.exists() or not any(src.glob("*.safetensors")):
+            console.print(f"[yellow]Skip {qid}: MLX weights missing at {src}[/]")
             continue
 
         out = PACKAGES_DIR / f"{cfg.model_name}-{qid}"

@@ -15,25 +15,39 @@ if ! python -c "import typer, huggingface_hub" 2>/dev/null; then
     pip install -e .
 fi
 
-echo "[1/5] info"
-python -m build.cli info
+echo "[0/5] prerequisites"
+missing=()
+for tool in cmake git; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        missing+=("$tool")
+    fi
+done
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "  missing: ${missing[*]}"
+    case "$(uname -s)" in
+        Darwin) echo "  install: brew install ${missing[*]}" ;;
+        Linux)  echo "  install: sudo apt install ${missing[*]}" ;;
+        *)      echo "  please install: ${missing[*]}" ;;
+    esac
+    exit 1
+fi
+echo "  ok: $(cmake --version | head -1), $(git --version)"
 
-echo "[2/5] download base"
-python -m build.cli download
+TARGET_CTX="${CODERLLM_CTX:-32768}"
 
-echo "[3/5] convert + package MLX (Mac only; skipped elsewhere)"
-python -m build.cli convert-mlx   || true
-python -m build.cli package --kind mlx  || true
+echo "[1/3] auto-detect + plan"
+python -m build.cli detect --ctx "$TARGET_CTX"
 
-echo "[4/5] convert + package GGUF"
-python -m build.cli convert-gguf
-python -m build.cli package --kind gguf
-
-echo "[5/5] upload (requires HF_TOKEN)"
+echo
+echo "[2/3] build the picked variant(s)"
 if [ -n "${HF_TOKEN:-}" ]; then
-    python -m build.cli upload
+    python -m build.cli auto --ctx "$TARGET_CTX" --yes --upload
 else
-    echo "  skip — set HF_TOKEN to enable upload"
+    echo "  HF_TOKEN not set — building locally, not uploading"
+    python -m build.cli auto --ctx "$TARGET_CTX" --yes
 fi
 
-echo "done."
+echo
+echo "[3/3] done."
+echo "  packages: work/packages/"
+echo "  import into LM Studio: File → Import Model → select the folder"

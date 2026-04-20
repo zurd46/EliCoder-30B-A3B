@@ -28,12 +28,33 @@ def _ensure_llama_cpp() -> Path:
     quant_bin = _bin_path(root, "llama-quantize")
     imatrix_bin = _bin_path(root, "llama-imatrix")
     if not quant_bin.exists() or not imatrix_bin.exists():
+        _require_tool("cmake", install_hint={
+            "darwin": "brew install cmake",
+            "linux": "sudo apt install cmake  (or your distro's package manager)",
+            "win32": "choco install cmake   or   winget install Kitware.CMake",
+        })
+        _require_tool("git", install_hint={
+            "darwin": "xcode-select --install",
+            "linux": "sudo apt install git",
+            "win32": "winget install Git.Git",
+        })
         console.print("[bold cyan]Building llama.cpp (release, metal/cuda/vulkan auto)[/]")
         build = root / "build"
         build.mkdir(exist_ok=True)
         _run(["cmake", "-S", str(root), "-B", str(build), "-DCMAKE_BUILD_TYPE=Release"])
         _run(["cmake", "--build", str(build), "--config", "Release", "-j"])
     return root
+
+
+def _require_tool(name: str, install_hint: dict[str, str]) -> None:
+    import sys as _sys
+    if shutil.which(name) is not None:
+        return
+    plat = _sys.platform
+    hint = install_hint.get(plat) or install_hint.get("linux") or ""
+    console.print(f"[red]Required tool not found: {name}[/]")
+    console.print(f"[yellow]Install:[/] {hint}")
+    raise RuntimeError(f"{name} not installed")
 
 
 def _bin_path(root: Path, name: str) -> Path:

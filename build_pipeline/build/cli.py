@@ -8,6 +8,7 @@ from .convert_mlx import convert_mlx
 from .convert_gguf import convert_gguf, cleanup_f16
 from .lm_studio import package_gguf, package_mlx
 from .upload import upload_variant, upload_all, whoami
+from . import auto as auto_mod
 
 app = typer.Typer(add_completion=False, help="CoderLLM build pipeline — download, quantize, package, upload.")
 console = Console()
@@ -75,6 +76,43 @@ def cmd_whoami():
 @app.command("cleanup")
 def cmd_cleanup():
     cleanup_f16()
+
+
+@app.command("detect")
+def cmd_detect(target_ctx: int = typer.Option(32768, "--ctx", help="planned context length")):
+    h = auto_mod.detect()
+    auto_mod.print_plan(h, target_ctx)
+
+
+@app.command("auto")
+def cmd_auto(
+    target_ctx: int = typer.Option(32768, "--ctx", help="planned context length"),
+    upload: bool = typer.Option(False, help="also upload the picked variant(s) to HF"),
+    private: bool = typer.Option(None),
+    yes: bool = typer.Option(False, "--yes", "-y", help="skip confirmation"),
+):
+    host = auto_mod.detect()
+    picks = auto_mod.print_plan(host, target_ctx)
+    if not picks:
+        console.print("[red]No suitable variant for this host.[/]")
+        raise typer.Exit(1)
+    if not yes:
+        ok = console.input("\nproceed with these variants? [Y/n] ").strip().lower()
+        if ok and ok not in ("y", "yes", "j", "ja"):
+            raise typer.Exit(0)
+
+    download_base()
+    for kind, vid in picks:
+        if kind == "mlx":
+            convert_mlx(quant_id=vid)
+            package_mlx(variant_id=vid)
+        else:
+            convert_gguf(quant_id=vid)
+            package_gguf(variant_id=vid)
+
+    if upload:
+        for kind, vid in picks:
+            upload_variant(vid, private=private)
 
 
 @app.command("all")
