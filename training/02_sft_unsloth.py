@@ -83,13 +83,16 @@ _u.time_limited_stats_check = lambda *a, **kw: None
 print("unsloth stats patched")
 
 # %%
-import os, yaml, torch
+import os
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["WANDB_PROJECT"] = "coder-16b-dyn"
+
+import yaml, torch
 from pathlib import Path
 from datasets import load_dataset
 from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
 
-os.environ["WANDB_PROJECT"] = "coder-16b-dyn"
 TOK = os.environ["HF_TOKEN"]
 
 CFG = yaml.safe_load(Path("configs/sft.yaml").read_text())
@@ -130,7 +133,7 @@ args = SFTConfig(
     output_dir=CFG["output"]["local_dir"],
     per_device_train_batch_size=CFG["training"]["per_device_train_batch_size"],
     gradient_accumulation_steps=CFG["training"]["gradient_accumulation_steps"],
-    warmup_ratio=CFG["training"]["warmup_ratio"],
+    warmup_steps=CFG["training"]["warmup_steps"],
     num_train_epochs=CFG["training"]["num_train_epochs"],
     learning_rate=CFG["training"]["learning_rate"],
     bf16=CFG["training"]["bf16"],
