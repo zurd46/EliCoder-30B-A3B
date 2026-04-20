@@ -99,10 +99,19 @@ TOK = os.environ["HF_TOKEN"]
 CFG = yaml.safe_load(Path("configs/dpo.yaml").read_text())
 
 # %%
+import gc
+gc.collect()
+torch.cuda.empty_cache()
+free_gb = torch.cuda.mem_get_info()[0] / 1024**3
+print(f"GPU free: {free_gb:.1f} GB")
+assert free_gb > 40, "restart runtime (disconnect+delete)"
+
+# %%
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=CFG["base_model"],
     max_seq_length=CFG["training"]["max_seq_length"],
     load_in_4bit=True,
+    device_map={"": 0},
     token=TOK,
 )
 

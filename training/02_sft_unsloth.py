@@ -98,6 +98,21 @@ TOK = os.environ["HF_TOKEN"]
 
 CFG = yaml.safe_load(Path("configs/sft.yaml").read_text())
 
+# %% [markdown]
+# ## GPU sauber machen — falls vorheriger Run fragmentiert hat
+
+# %%
+import gc
+gc.collect()
+torch.cuda.empty_cache()
+free_gb = torch.cuda.mem_get_info()[0] / 1024**3
+total_gb = torch.cuda.mem_get_info()[1] / 1024**3
+print(f"GPU free: {free_gb:.1f} / {total_gb:.1f} GB")
+assert free_gb > 40, (
+    f"GPU has only {free_gb:.1f} GB free — RESTART RUNTIME "
+    "(Runtime → Disconnect and delete runtime), then rerun all cells."
+)
+
 # %%
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=CFG["base_model"],
@@ -105,6 +120,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     dtype=None,
     load_in_4bit=CFG["load_in_4bit"],
     token=TOK,
+    device_map={"": 0},
 )
 
 model = FastLanguageModel.get_peft_model(
