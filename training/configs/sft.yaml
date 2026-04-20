@@ -2,22 +2,25 @@ base_model: Qwen/Qwen3-Coder-30B-A3B-Instruct
 load_in_4bit: true
 
 lora:
-  r: 32
-  alpha: 64
+  r: 64
+  alpha: 128
   dropout: 0.0
   target_modules:
     - q_proj
     - k_proj
     - v_proj
     - o_proj
-  use_rslora: false
-  finetune_all_experts: false
+    - gate_proj
+    - up_proj
+    - down_proj
+  use_rslora: true
+  finetune_all_experts: true
 
 training:
   dataset: zurd46/coder-16b-dyn-sft
   split: train
-  max_seq_length: 4096
-  num_train_epochs: 3
+  max_seq_length: 8192
+  num_train_epochs: 2
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 64
   learning_rate: 1.0e-4
@@ -33,7 +36,7 @@ training:
   save_total_limit: 3
   seed: 42
   dataset_num_proc: 4
-  packing: false
+  packing: true
   remove_unused_columns: false
   eval_strategy: "no"
   dataloader_pin_memory: false
