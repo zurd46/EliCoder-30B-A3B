@@ -11,7 +11,7 @@ layer_freeze:
   freeze_until_layer: 30
 
 training:
-  dataset: zurd46/coder-16b-dyn-longctx
+  dataset: zurd46/EliCoder-Dataset-LongCtx
   split: train
   max_seq_length: 131072
   num_train_epochs: 1

@@ -6,7 +6,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "http://localhost:1234/v1")
 API_KEY = os.environ.get("OPENAI_API_KEY", "lm-studio")
-MODEL_ID = os.environ.get("MODEL_ID", "coder-16b-dyn-UD-Q4_K_XL")
+MODEL_ID = os.environ.get("MODEL_ID", "EliCoder-30B-A3B-UD-Q4_K_XL")
 
 RESULTS_DIR = Path(__file__).parent / "results"
 RESULTS_DIR.mkdir(exist_ok=True)

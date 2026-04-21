@@ -191,7 +191,7 @@ for fn, key in loaders:
 
 sft = concatenate_datasets(parts).shuffle(seed=42)
 print(f"\nSFT total: {len(sft)} samples")
-sft.push_to_hub(f"{OWNER}/coder-16b-dyn-sft", private=True, token=TOK)
+sft.push_to_hub(f"{OWNER}/EliCoder-Dataset-SFT", private=True, token=TOK)
 
 
 # ── DPO ──────────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ for fn, label, n in [(load_code_preference_pairs, "code-pref", 50_000),
 
 dpo = concatenate_datasets(dpo_parts).shuffle(seed=42)
 print(f"\nDPO total: {len(dpo)}")
-dpo.push_to_hub(f"{OWNER}/coder-16b-dyn-dpo", private=True, token=TOK)
+dpo.push_to_hub(f"{OWNER}/EliCoder-Dataset-DPO", private=True, token=TOK)
 
 
 # ── LongCtx — Python-Code als Haystack (statt Zufallswörter) ─────────────────
@@ -287,11 +287,11 @@ def synth_long_ctx_code(n: int, lengths=(16_000, 32_000, 64_000, 128_000)):
 
 longctx = synth_long_ctx_code(6_000)
 print(f"\nLongCtx total: {len(longctx)}")
-longctx.push_to_hub(f"{OWNER}/coder-16b-dyn-longctx", private=True, token=TOK)
+longctx.push_to_hub(f"{OWNER}/EliCoder-Dataset-LongCtx", private=True, token=TOK)
 
 print("\nall datasets pushed:")
-print(f"  SFT:     huggingface.co/datasets/{OWNER}/coder-16b-dyn-sft")
-print(f"  DPO:     huggingface.co/datasets/{OWNER}/coder-16b-dyn-dpo")
-print(f"  LongCtx: huggingface.co/datasets/{OWNER}/coder-16b-dyn-longctx")
+print(f"  SFT:     huggingface.co/datasets/{OWNER}/EliCoder-Dataset-SFT")
+print(f"  DPO:     huggingface.co/datasets/{OWNER}/EliCoder-Dataset-DPO")
+print(f"  LongCtx: huggingface.co/datasets/{OWNER}/EliCoder-Dataset-LongCtx")
 
 Path("/workspace/.phase01_done").touch()

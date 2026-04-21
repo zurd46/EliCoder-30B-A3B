@@ -71,7 +71,7 @@ Five-phase pipeline on a single NVIDIA H100 NVL (94 GB):
 ### Phase 1 — Dataset construction (CPU)
 All training datasets are consolidated from public HuggingFace sources and pushed to private HF repos for reproducibility.
 
-**SFT dataset** → `zurd46/coder-16b-dyn-sft` (~180k samples)
+**SFT dataset** → `zurd46/EliCoder-Dataset-SFT` (~180k samples)
 
 | Source | Samples (max) | Purpose |
 |---|---|---|
@@ -83,14 +83,14 @@ All training datasets are consolidated from public HuggingFace sources and pushe
 | `princeton-nlp/SWE-bench_Verified` | 500 | Real GitHub issues with verified patches |
 | `AlicanKiraz0/Agentic-Chain-of-Thought-Coding-SFT-Dataset` | 10,000 | Agentic multi-step coding reasoning |
 
-**DPO dataset** → `zurd46/coder-16b-dyn-dpo` (~70k preference pairs)
+**DPO dataset** → `zurd46/EliCoder-Dataset-DPO` (~70k preference pairs)
 
 | Source | Pairs (max) | Purpose |
 |---|---|---|
 | `Vezora/Code-Preference-Pairs` | 50,000 | Buggy vs. fixed code pairs (quality signal) |
 | `jondurbin/py-dpo-v0.1` | 20,000 | General Python preference pairs |
 
-**Long-Context dataset** → `zurd46/coder-16b-dyn-longctx` (8,000 samples)
+**Long-Context dataset** → `zurd46/EliCoder-Dataset-LongCtx` (8,000 samples)
 
 - Synthetic needle-in-haystack: randomly generated passphrases embedded in word-based haystacks of 32k / 64k / 128k / 200k tokens
 - Purpose: stabilize positional encodings after YaRN extension to 262k, not to teach new semantic skills
@@ -103,21 +103,21 @@ All training datasets are consolidated from public HuggingFace sources and pushe
 - Learning rate 2e-5, cosine schedule, 100 warmup steps, 1 epoch
 - Optimizer: 8-bit Paged AdamW, weight decay 0.01
 - Gradient checkpointing enabled (Unsloth kernels)
-- Output adapter → `zurd46/coder-16b-dyn-lora-sft`
+- Output adapter → `zurd46/EliCoder-30B-A3B-LoRA-SFT`
 
 ### Phase 3 — Direct Preference Optimization (DPO)
 - Built on top of the SFT LoRA adapter
 - β = 0.1, learning rate 5e-6, cosine schedule
 - `max_seq_length=8192`, `max_prompt_length=8192`
 - Effective batch 32, 600 training steps
-- Output adapter → `zurd46/coder-16b-dyn-lora-dpo`
+- Output adapter → `zurd46/EliCoder-30B-A3B-LoRA-DPO`
 
 ### Phase 4 — Long-Context extension (YaRN)
 - Built on top of the DPO LoRA adapter
 - YaRN rope scaling: factor 4.0, original 65,536 → target 262,144 positions
 - Layer-freeze: only transformer layers ≥ 30 are trainable
 - Learning rate 2e-5, 1 epoch on the synthetic LongCtx dataset
-- Output adapter → `zurd46/coder-16b-dyn-lora-longctx`
+- Output adapter → `zurd46/EliCoder-30B-A3B-LoRA-LongCtx`
 
 ### Phase 5 — Merge & export
 - SFT + DPO + LongCtx LoRA deltas merged into the BF16 base weights
@@ -131,7 +131,7 @@ All training datasets are consolidated from public HuggingFace sources and pushe
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
-model_id = "zurd46/coder-16b-dyn-base-fp16"
+model_id = "zurd46/EliCoder-30B-A3B"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(
     model_id,
@@ -152,12 +152,12 @@ Quantized MLX builds are published as sibling repos:
 
 | Repo | Bits | Size | Use case |
 |---|---|---|---|
-| [`zurd46/coder-16b-dyn-mlx-4bit`](https://huggingface.co/zurd46/coder-16b-dyn-mlx-4bit) | 4 | ~16.5 GB | Default — fast on M-series Macs |
-| [`zurd46/coder-16b-dyn-mlx-3bit`](https://huggingface.co/zurd46/coder-16b-dyn-mlx-3bit) | 3 | ~12.8 GB | Tighter memory budget |
+| [`zurd46/EliCoder-30B-A3B-mlx-4bit`](https://huggingface.co/zurd46/EliCoder-30B-A3B-mlx-4bit) | 4 | ~16.5 GB | Default — fast on M-series Macs |
+| [`zurd46/EliCoder-30B-A3B-mlx-3bit`](https://huggingface.co/zurd46/EliCoder-30B-A3B-mlx-3bit) | 3 | ~12.8 GB | Tighter memory budget |
 
 ```bash
 pip install mlx-lm
-python -m mlx_lm.generate --model zurd46/coder-16b-dyn-mlx-4bit --prompt "Fix this function: ..."
+python -m mlx_lm.generate --model zurd46/EliCoder-30B-A3B-mlx-4bit --prompt "Fix this function: ..."
 ```
 
 ### With llama.cpp / LM Studio
@@ -165,9 +165,9 @@ GGUF quants (Unsloth Dynamic 2.0, imatrix-calibrated) are published as sibling r
 
 | Repo | Type | Size | Use case |
 |---|---|---|---|
-| [`zurd46/coder-16b-dyn-gguf-UD-Q4_K_XL`](https://huggingface.co/zurd46/coder-16b-dyn-gguf-UD-Q4_K_XL) | Q4_K_M | ~17.7 GB | Default quality profile |
-| [`zurd46/coder-16b-dyn-gguf-UD-Q3_K_XL`](https://huggingface.co/zurd46/coder-16b-dyn-gguf-UD-Q3_K_XL) | Q3_K_L | ~13.8 GB | Long-context profile (more KV budget) |
-| [`zurd46/coder-16b-dyn-gguf-UD-IQ2_M`](https://huggingface.co/zurd46/coder-16b-dyn-gguf-UD-IQ2_M) | IQ2_M | ~10.8 GB | Fits 16 GB hardware |
+| [`zurd46/EliCoder-30B-A3B-UD-Q4_K_XL`](https://huggingface.co/zurd46/EliCoder-30B-A3B-UD-Q4_K_XL) | Q4_K_M | ~17.7 GB | Default quality profile |
+| [`zurd46/EliCoder-30B-A3B-UD-Q3_K_XL`](https://huggingface.co/zurd46/EliCoder-30B-A3B-UD-Q3_K_XL) | Q3_K_L | ~13.8 GB | Long-context profile (more KV budget) |
+| [`zurd46/EliCoder-30B-A3B-UD-IQ2_M`](https://huggingface.co/zurd46/EliCoder-30B-A3B-UD-IQ2_M) | IQ2_M | ~10.8 GB | Fits 16 GB hardware |
 
 All GGUF repos ship a `model.yaml` for one-click LM Studio import.
 
@@ -192,7 +192,7 @@ All GGUF repos ship a `model.yaml` for one-click LM Studio import.
   title  = {CoderLLM 16B-dyn: a LoRA-tuned Qwen3-Coder for bilingual coding assistance},
   author = {Zurm{\\"u}hle, Daniel},
   year   = {2026},
-  url    = {https://huggingface.co/zurd46/coder-16b-dyn-base-fp16},
+  url    = {https://huggingface.co/zurd46/EliCoder-30B-A3B},
   note   = {impulsai.ch}
 }
 ```
@@ -224,7 +224,7 @@ tags:
 
 **Developer:** Daniel Zurmühle · [impulsai.ch](https://impulsai.ch)
 
-This is an intermediate LoRA adapter in a multi-phase training pipeline. The final merged BF16 model is published at [`zurd46/coder-16b-dyn-base-fp16`](https://huggingface.co/zurd46/coder-16b-dyn-base-fp16) — use that for inference.
+This is an intermediate LoRA adapter in a multi-phase training pipeline. The final merged BF16 model is published at [`zurd46/EliCoder-30B-A3B`](https://huggingface.co/zurd46/EliCoder-30B-A3B) — use that for inference.
 
 ## Adapter details
 
@@ -264,7 +264,7 @@ model = PeftModel.from_pretrained(model, adapter)
 
 ## Limitations
 
-- This is an **intermediate adapter** — the fully trained and merged model is [`zurd46/coder-16b-dyn-base-fp16`](https://huggingface.co/zurd46/coder-16b-dyn-base-fp16).
+- This is an **intermediate adapter** — the fully trained and merged model is [`zurd46/EliCoder-30B-A3B`](https://huggingface.co/zurd46/EliCoder-30B-A3B).
 - Only attention projections were fine-tuned; MoE expert weights are unchanged.
 - No safety-specific RLHF and no public benchmark results.
 """
@@ -281,8 +281,8 @@ def adapter_card(phase: str) -> str:
                 "for the [impulsai.ch](https://impulsai.ch) coding assistant."
             ),
             "starting_point": "`Qwen/Qwen3-Coder-30B-A3B-Instruct` (base)",
-            "dataset_ref": "[`zurd46/coder-16b-dyn-sft`](https://huggingface.co/datasets/zurd46/coder-16b-dyn-sft) (~180k samples)",
-            "adapter_repo": "zurd46/coder-16b-dyn-lora-sft",
+            "dataset_ref": "[`zurd46/EliCoder-Dataset-SFT`](https://huggingface.co/datasets/zurd46/EliCoder-Dataset-SFT) (~180k samples)",
+            "adapter_repo": "zurd46/EliCoder-30B-A3B-LoRA-SFT",
             "dataset_details": (
                 "Aggregated from seven public HuggingFace sources:\n\n"
                 "- `nvidia/Nemotron-SFT-OpenCode-v1` (40k) — NVIDIA-curated high-quality code SFT\n"
@@ -295,7 +295,7 @@ def adapter_card(phase: str) -> str:
             ),
             "pipeline_context": (
                 "Phase 2 of 5. The next phase (DPO) is applied on top of this adapter and is published at "
-                "[`zurd46/coder-16b-dyn-lora-dpo`](https://huggingface.co/zurd46/coder-16b-dyn-lora-dpo)."
+                "[`zurd46/EliCoder-30B-A3B-LoRA-DPO`](https://huggingface.co/zurd46/EliCoder-30B-A3B-LoRA-DPO)."
             ),
         },
         "dpo": {
@@ -305,9 +305,9 @@ def adapter_card(phase: str) -> str:
                 "Direct Preference Optimization (DPO) LoRA adapter built on top of the SFT adapter. "
                 "Aligns the model towards bug-free, higher-quality code for the [impulsai.ch](https://impulsai.ch) coding assistant."
             ),
-            "starting_point": "[`zurd46/coder-16b-dyn-lora-sft`](https://huggingface.co/zurd46/coder-16b-dyn-lora-sft)",
-            "dataset_ref": "[`zurd46/coder-16b-dyn-dpo`](https://huggingface.co/datasets/zurd46/coder-16b-dyn-dpo) (~70k preference pairs)",
-            "adapter_repo": "zurd46/coder-16b-dyn-lora-dpo",
+            "starting_point": "[`zurd46/EliCoder-30B-A3B-LoRA-SFT`](https://huggingface.co/zurd46/EliCoder-30B-A3B-LoRA-SFT)",
+            "dataset_ref": "[`zurd46/EliCoder-Dataset-DPO`](https://huggingface.co/datasets/zurd46/EliCoder-Dataset-DPO) (~70k preference pairs)",
+            "adapter_repo": "zurd46/EliCoder-30B-A3B-LoRA-DPO",
             "dataset_details": (
                 "Aggregated from two public HuggingFace preference datasets:\n\n"
                 "- `Vezora/Code-Preference-Pairs` (50k) — buggy vs. fixed code pairs\n"
@@ -315,7 +315,7 @@ def adapter_card(phase: str) -> str:
             ),
             "pipeline_context": (
                 "Phase 3 of 5. The next phase (Long-Context / YaRN) is applied on top of this adapter and is published at "
-                "[`zurd46/coder-16b-dyn-lora-longctx`](https://huggingface.co/zurd46/coder-16b-dyn-lora-longctx)."
+                "[`zurd46/EliCoder-30B-A3B-LoRA-LongCtx`](https://huggingface.co/zurd46/EliCoder-30B-A3B-LoRA-LongCtx)."
             ),
         },
         "longctx": {
@@ -325,9 +325,9 @@ def adapter_card(phase: str) -> str:
                 "Long-context extension LoRA adapter built on top of the DPO adapter. "
                 "Uses YaRN rope scaling (factor 4.0) to extend the usable context from 65,536 to 262,144 tokens."
             ),
-            "starting_point": "[`zurd46/coder-16b-dyn-lora-dpo`](https://huggingface.co/zurd46/coder-16b-dyn-lora-dpo)",
-            "dataset_ref": "[`zurd46/coder-16b-dyn-longctx`](https://huggingface.co/datasets/zurd46/coder-16b-dyn-longctx) (8k synthetic samples)",
-            "adapter_repo": "zurd46/coder-16b-dyn-lora-longctx",
+            "starting_point": "[`zurd46/EliCoder-30B-A3B-LoRA-DPO`](https://huggingface.co/zurd46/EliCoder-30B-A3B-LoRA-DPO)",
+            "dataset_ref": "[`zurd46/EliCoder-Dataset-LongCtx`](https://huggingface.co/datasets/zurd46/EliCoder-Dataset-LongCtx) (8k synthetic samples)",
+            "adapter_repo": "zurd46/EliCoder-30B-A3B-LoRA-LongCtx",
             "dataset_details": (
                 "Synthetic needle-in-haystack dataset: 8,000 samples with passphrases embedded in word-based "
                 "haystacks of 32k / 64k / 128k / 200k tokens. The goal is to stabilize positional encodings "
@@ -335,7 +335,7 @@ def adapter_card(phase: str) -> str:
             ),
             "pipeline_context": (
                 "Phase 4 of 5. Phase 5 merges all three LoRA adapters (SFT + DPO + LongCtx) into the BF16 base weights, "
-                "published at [`zurd46/coder-16b-dyn-base-fp16`](https://huggingface.co/zurd46/coder-16b-dyn-base-fp16)."
+                "published at [`zurd46/EliCoder-30B-A3B`](https://huggingface.co/zurd46/EliCoder-30B-A3B)."
             ),
         },
     }

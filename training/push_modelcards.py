@@ -25,10 +25,10 @@ from _modelcard import MERGED_CARD, adapter_card  # noqa: E402
 OWNER = os.environ.get("CODERLLM_HF_OWNER", "zurd46")
 
 REPOS = {
-    "sft":     (f"{OWNER}/coder-16b-dyn-lora-sft",     lambda: adapter_card("sft")),
-    "dpo":     (f"{OWNER}/coder-16b-dyn-lora-dpo",     lambda: adapter_card("dpo")),
-    "longctx": (f"{OWNER}/coder-16b-dyn-lora-longctx", lambda: adapter_card("longctx")),
-    "merged":  (f"{OWNER}/coder-16b-dyn-base-fp16",    lambda: MERGED_CARD),
+    "sft":     (f"{OWNER}/EliCoder-30B-A3B-LoRA-SFT",     lambda: adapter_card("sft")),
+    "dpo":     (f"{OWNER}/EliCoder-30B-A3B-LoRA-DPO",     lambda: adapter_card("dpo")),
+    "longctx": (f"{OWNER}/EliCoder-30B-A3B-LoRA-LongCtx", lambda: adapter_card("longctx")),
+    "merged":  (f"{OWNER}/EliCoder-30B-A3B",    lambda: MERGED_CARD),
 }
 
 

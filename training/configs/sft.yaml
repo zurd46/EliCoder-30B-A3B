@@ -14,7 +14,7 @@ lora:
   finetune_all_experts: false
 
 training:
-  dataset: zurd46/coder-16b-dyn-sft
+  dataset: zurd46/EliCoder-Dataset-SFT
   split: train
   max_seq_length: 8192
   num_train_epochs: 1

@@ -2,7 +2,7 @@ base_model: Qwen/Qwen3-Coder-30B-A3B-Instruct
 adapter_repo: zurd46/EliCoder-30B-A3B-LoRA-SFT
 
 training:
-  dataset: zurd46/coder-16b-dyn-dpo
+  dataset: zurd46/EliCoder-Dataset-DPO
   split: train
   max_seq_length: 8192
   max_prompt_length: 4096
