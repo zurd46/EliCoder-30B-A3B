@@ -97,9 +97,9 @@ def analyze(name: str, repo: str, kind: str) -> None:
 
 if __name__ == "__main__":
     targets = [
-        ("SFT", "zurd46/coder-16b-dyn-sft", "sft"),
-        ("DPO", "zurd46/coder-16b-dyn-dpo", "dpo"),
-        ("LongCtx", "zurd46/coder-16b-dyn-longctx", "longctx"),
+        ("SFT", "zurd46/EliCoder-Dataset-SFT", "sft"),
+        ("DPO", "zurd46/EliCoder-Dataset-DPO", "dpo"),
+        ("LongCtx", "zurd46/EliCoder-Dataset-LongCtx", "longctx"),
     ]
     only = sys.argv[1] if len(sys.argv) > 1 else None
     for name, repo, kind in targets:
