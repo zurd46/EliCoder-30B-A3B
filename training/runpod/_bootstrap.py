@@ -16,7 +16,8 @@ CACHE_ROOT = WORKSPACE / "hf_cache"
 DEPS_MARKER = WORKSPACE / ".deps_installed"
 
 PIP_PACKAGES = [
-    "unsloth[cu124] @ git+https://github.com/unslothai/unsloth.git",
+    "unsloth @ git+https://github.com/unslothai/unsloth.git",
+    "unsloth_zoo",
     "trl>=0.12", "transformers>=4.46", "datasets>=3.0",
     "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml",
     "huggingface_hub>=0.25", "tqdm",
