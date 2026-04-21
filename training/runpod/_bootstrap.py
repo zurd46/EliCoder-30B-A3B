@@ -77,6 +77,12 @@ def bootstrap(*, install: bool = True) -> Path:
 def apply_gpu_optims() -> None:
     """Hopper-spezifische Optimierungen — vor Model-Load aufrufen."""
     import torch
+    # Force-load torch._inductor.config — unsloth_zoo >=2026 greift als
+    # Attribut drauf zu, torch 2.4 lädt es aber nicht eager.
+    try:
+        import torch._inductor.config  # noqa: F401
+    except Exception:
+        pass
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
@@ -101,6 +107,10 @@ def checkpoint_dir(phase: str) -> Path:
 
 def patch_unsloth_telemetry() -> None:
     """No-op Unsloth's HF stats-endpoint — hängt in Colab/RunPod ~120s."""
+    try:
+        import torch._inductor.config  # noqa: F401
+    except Exception:
+        pass
     import unsloth.models._utils as _u
     _u._get_statistics = lambda *a, **kw: None
     _u.time_limited_stats_check = lambda *a, **kw: None
