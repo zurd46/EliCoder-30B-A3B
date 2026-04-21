@@ -66,9 +66,11 @@ class TrainState:
     last_grad_norm: Optional[float] = None
     step_times: deque = field(default_factory=lambda: deque(maxlen=20))
     started_at: Optional[datetime] = None
+    training_started_at: Optional[datetime] = None  # Zeitpunkt Step 1 begann
     last_line: str = ""
     log_tail: deque = field(default_factory=lambda: deque(maxlen=18))
     status: str = "verbinde…"
+    phase: str = "Init"
 
 @dataclass
 class GpuState:
@@ -96,6 +98,22 @@ GRAD_RE = re.compile(r"'grad_norm'\s*:\s*([0-9.eE+-]+)")
 TOTAL_STEPS_RE = re.compile(r"Total steps\s*=\s*([0-9,]+)")
 STEP_TIME_RE = re.compile(r"(\d+(?:\.\d+)?)(s|min)/it")
 
+PHASE_HINTS = [
+    ("Loading weights", "Weights laden (Shards)"),
+    ("Fast downloading", "Model-Download"),
+    ("tokenizing",       "Tokenisierung"),
+    ("Map",              "Dataset-Preprocessing"),
+    ("packing",          "Packing"),
+    ("Num examples",     "Trainer init"),
+]
+
+def detect_phase(line: str) -> Optional[str]:
+    low = line.lower()
+    for needle, label in PHASE_HINTS:
+        if needle.lower() in low:
+            return label
+    return None
+
 def parse_log_line(line: str) -> None:
     line = line.rstrip("\n")
     if not line:
@@ -108,17 +126,27 @@ def parse_log_line(line: str) -> None:
         if TRAIN.started_at is None:
             TRAIN.started_at = datetime.now()
 
-    if m := STEP_RE.search(line):
+    if phase := detect_phase(line):
+        TRAIN.phase = phase
+
+    # Step nur akzeptieren wenn total mit bekannten total_steps übereinstimmt —
+    # sonst matchen auch "Loading weights: 531/531" und ds.map-Progress-Bars.
+    is_train_step_line = False
+    if (m := STEP_RE.search(line)) and TRAIN.total_steps > 0:
         step = int(m.group(1))
         total = int(m.group(2))
-        if total > TRAIN.total_steps:
-            TRAIN.total_steps = total
-        if step > TRAIN.current_step:
-            TRAIN.current_step = step
-            if TRAIN.started_at is None:
-                TRAIN.started_at = datetime.now()
+        if total == TRAIN.total_steps:
+            is_train_step_line = True
+            TRAIN.phase = "Training"
+            if step > TRAIN.current_step:
+                TRAIN.current_step = step
+                if TRAIN.training_started_at is None and step >= 1:
+                    TRAIN.training_started_at = datetime.now()
+                if TRAIN.started_at is None:
+                    TRAIN.started_at = datetime.now()
 
-    if m := STEP_TIME_RE.search(line):
+    # Step-times nur aus Trainings-Progress-Bars übernehmen, nicht aus Weight-Loading
+    if is_train_step_line and (m := STEP_TIME_RE.search(line)):
         val = float(m.group(1))
         unit = m.group(2)
         secs = val * 60 if unit == "min" else val
@@ -132,14 +160,16 @@ def parse_log_line(line: str) -> None:
         TRAIN.last_grad_norm = float(m.group(1))
 
     lower = line.lower()
-    if "traceback" in lower or "error" in lower or "oom" in lower:
+    if "traceback" in lower or "cuda out of memory" in lower:
         TRAIN.status = "[bold red]FEHLER im Log[/bold red]"
     elif "sft done" in lower:
         TRAIN.status = "[bold green]FERTIG[/bold green]"
-    elif TRAIN.current_step > 0:
-        TRAIN.status = f"[green]läuft · Step {TRAIN.current_step}/{TRAIN.total_steps}[/green]"
+    elif TRAIN.current_step > 0 and TRAIN.total_steps > 0:
+        TRAIN.status = f"[green]läuft · Step {TRAIN.current_step} von {TRAIN.total_steps}[/green]"
+    elif TRAIN.total_steps > 0:
+        TRAIN.status = f"[yellow]{TRAIN.phase} · wartet auf ersten Step…[/yellow]"
     else:
-        TRAIN.status = "[yellow]wartet auf ersten Step…[/yellow]"
+        TRAIN.status = f"[yellow]{TRAIN.phase}…[/yellow]"
 
 # ---------- Worker ----------
 def log_tail_worker() -> None:
@@ -207,10 +237,10 @@ def fmt_td(sec: float) -> str:
 
 def header_panel() -> Panel:
     avg = (sum(TRAIN.step_times) / len(TRAIN.step_times)) if TRAIN.step_times else 0
-    done = TRAIN.current_step
+    done = max(0, min(TRAIN.current_step, TRAIN.total_steps)) if TRAIN.total_steps else 0
     total = TRAIN.total_steps or 0
     remaining = max(total - done, 0)
-    eta = remaining * avg if avg else 0
+    eta = remaining * avg if avg and total else 0
     pct = (done / total * 100) if total else 0
 
     bar_w = 30
@@ -219,12 +249,21 @@ def header_panel() -> Panel:
 
     t = Table.grid(padding=(0, 2))
     t.add_column(style="bold cyan"); t.add_column()
+    t.add_row("Phase", TRAIN.phase)
     t.add_row("Status", TRAIN.status)
-    t.add_row("Progress", f"[cyan]{bar}[/cyan]  {done}/{total}  ({pct:5.1f}%)")
-    t.add_row("Step-time (ø20)", f"{avg:.1f}s/it" if avg else "—")
-    t.add_row("ETA", fmt_td(eta))
-    if TRAIN.started_at:
-        t.add_row("Läuft seit", fmt_td((datetime.now() - TRAIN.started_at).total_seconds()))
+
+    if total > 0:
+        progress_text = f"[cyan]{bar}[/cyan]  Step {done} von {total}  ({pct:5.1f}%)"
+    else:
+        progress_text = "[dim]noch kein Trainings-Start (Setup läuft)[/dim]"
+    t.add_row("Progress", progress_text)
+
+    t.add_row("Step-time (ø20)", f"{avg:.1f}s/it" if avg else "[dim]—[/dim]")
+    t.add_row("ETA", fmt_td(eta) if eta else "[dim]—[/dim]")
+    if TRAIN.training_started_at:
+        t.add_row("Training seit", fmt_td((datetime.now() - TRAIN.training_started_at).total_seconds()))
+    elif TRAIN.started_at:
+        t.add_row("Setup seit", fmt_td((datetime.now() - TRAIN.started_at).total_seconds()))
     return Panel(t, title="[bold]SFT Training[/bold]", border_style="cyan")
 
 def metrics_panel() -> Panel:
