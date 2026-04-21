@@ -197,7 +197,7 @@ model = FastLanguageModel.get_peft_model(
     target_modules=CFG["lora"]["target_modules"],
     use_rslora=CFG["lora"]["use_rslora"],
     bias="none",
-    use_gradient_checkpointing="unsloth",
+    use_gradient_checkpointing=("unsloth" if CFG["training"].get("gradient_checkpointing", True) else False),
     random_state=42,
 )
 
