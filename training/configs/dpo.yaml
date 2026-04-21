@@ -4,22 +4,22 @@ adapter_repo: zurd46/coder-16b-dyn-lora-sft
 training:
   dataset: zurd46/coder-16b-dyn-dpo
   split: train
-  max_seq_length: 16384
-  max_prompt_length: 8192
-  beta: 0.1
+  max_seq_length: 8192
+  max_prompt_length: 4096
+  beta: 0.05
   num_train_epochs: 1
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 32
-  learning_rate: 5.0e-6
+  learning_rate: 2.0e-6
   lr_scheduler_type: cosine
   warmup_ratio: 0.05
   optim: paged_adamw_8bit
   bf16: true
   gradient_checkpointing: true
   logging_steps: 10
-  save_steps: 500
+  save_steps: 100
   seed: 42
 
 output:
   hf_repo: zurd46/coder-16b-dyn-lora-dpo
-  local_dir: /content/lora-dpo
+  local_dir: /workspace/lora-dpo
