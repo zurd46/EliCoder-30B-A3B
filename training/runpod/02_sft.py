@@ -85,6 +85,13 @@ def fmt(example):
 
 ds = ds.map(fmt, remove_columns=ds.column_names)
 
+eval_frac = float(TRAIN.get("eval_fraction", 0) or 0)
+eval_ds = None
+if eval_frac > 0:
+    split = ds.train_test_split(test_size=eval_frac, seed=TRAIN["seed"])
+    ds, eval_ds = split["train"], split["test"]
+    print(f"eval split: {len(ds):,} train / {len(eval_ds):,} eval ({eval_frac:.1%})")
+
 args = SFTConfig(
     output_dir=str(CKPT),
     per_device_train_batch_size=TRAIN["per_device_train_batch_size"],
@@ -105,7 +112,10 @@ args = SFTConfig(
     packing=TRAIN.get("packing", True),
     dataset_num_proc=TRAIN.get("dataset_num_proc", 4),
     remove_unused_columns=TRAIN.get("remove_unused_columns", False),
-    eval_strategy=TRAIN.get("eval_strategy", "no"),
+    eval_strategy=TRAIN.get("eval_strategy", "no") if eval_ds is not None else "no",
+    eval_steps=TRAIN.get("eval_steps", 20),
+    per_device_eval_batch_size=TRAIN.get("per_device_eval_batch_size", 1),
+    eval_accumulation_steps=TRAIN.get("eval_accumulation_steps", 2),
     dataloader_pin_memory=TRAIN.get("dataloader_pin_memory", False),
     gradient_checkpointing=TRAIN.get("gradient_checkpointing", True),
     gradient_checkpointing_kwargs={"use_reentrant": False},
@@ -118,7 +128,11 @@ args = SFTConfig(
     hub_private_repo=True,
 )
 
-trainer = SFTTrainer(model=model, tokenizer=tokenizer, train_dataset=ds, args=args)
+trainer = SFTTrainer(
+    model=model, tokenizer=tokenizer,
+    train_dataset=ds, eval_dataset=eval_ds,
+    args=args,
+)
 
 last_ckpt = get_last_checkpoint(str(CKPT))
 if last_ckpt:

@@ -17,8 +17,14 @@ training:
   bf16: true
   gradient_checkpointing: false
   logging_steps: 10
-  save_steps: 100
+  save_steps: 200
+  save_total_limit: 2
   seed: 42
+  # DPO kann schnell overfitten — Eval hilft Overfit-Detection
+  eval_fraction: 0.005
+  eval_strategy: steps
+  eval_steps: 200
+  per_device_eval_batch_size: 1
 
 output:
   hf_repo: zurd46/EliCoder-30B-A3B-LoRA-DPO
