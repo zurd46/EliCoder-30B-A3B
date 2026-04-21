@@ -1,0 +1,105 @@
+"""
+RunPod-Bootstrap — kein Colab, keine Drive-Mounts.
+
+- Erwartet: HF_TOKEN als ENV-Var (vom Pod gesetzt oder aus /workspace/.env)
+- Arbeitet in /workspace (Container-Disk oder Network Volume)
+- Installiert Deps nur wenn Marker-File fehlt (idempotent über Spot-Restarts)
+"""
+from __future__ import annotations
+import os, subprocess, sys
+from pathlib import Path
+
+WORKSPACE = Path(os.environ.get("CODERLLM_WORKSPACE", "/workspace"))
+REPO_DIR = WORKSPACE / "CoderLLM"
+CHECKPOINT_ROOT = WORKSPACE / "checkpoints"
+CACHE_ROOT = WORKSPACE / "hf_cache"
+DEPS_MARKER = WORKSPACE / ".deps_installed"
+
+PIP_PACKAGES = [
+    "unsloth[cu124] @ git+https://github.com/unslothai/unsloth.git",
+    "trl>=0.12", "transformers>=4.46", "datasets>=3.0",
+    "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml",
+    "huggingface_hub>=0.25", "tqdm",
+]
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+def bootstrap(*, install: bool = True) -> Path:
+    _load_env_file(WORKSPACE / ".env")
+
+    if not os.environ.get("HF_TOKEN"):
+        raise RuntimeError(
+            "HF_TOKEN nicht gesetzt. Setz ENV-Var oder lege /workspace/.env an "
+            "mit Zeile: HF_TOKEN=hf_xxx"
+        )
+    os.environ.setdefault("HUGGING_FACE_HUB_TOKEN", os.environ["HF_TOKEN"])
+    os.environ.setdefault("HF_HOME", str(CACHE_ROOT))
+    os.environ.setdefault("TRANSFORMERS_CACHE", str(CACHE_ROOT / "transformers"))
+    os.environ.setdefault("HF_DATASETS_CACHE", str(CACHE_ROOT / "datasets"))
+
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    CHECKPOINT_ROOT.mkdir(parents=True, exist_ok=True)
+    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+
+    if install and not DEPS_MARKER.exists():
+        print("installing pip deps (once per pod) …")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", *PIP_PACKAGES],
+            check=True,
+        )
+        DEPS_MARKER.touch()
+        print("deps installed.")
+    else:
+        print("deps already installed — skipping.")
+
+    training = REPO_DIR / "training"
+    if not training.exists():
+        raise RuntimeError(
+            f"{training} fehlt. Pipeline muss aus geklontem Repo laufen — "
+            f"clone zuerst nach {REPO_DIR}."
+        )
+    os.chdir(training)
+    print(f"cwd = {training}")
+    return training
+
+
+def apply_gpu_optims() -> None:
+    """Hopper-spezifische Optimierungen — vor Model-Load aufrufen."""
+    import torch
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
+    try:
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("CUDA_DEVICE_MAX_CONNECTIONS", "1")
+    props = torch.cuda.get_device_properties(0)
+    total_gb = props.total_memory / 1024**3
+    print(f"GPU: {props.name}  ({total_gb:.1f} GB, SM {props.major}.{props.minor})")
+    print(f"TF32 matmul: on, cuDNN benchmark: on")
+
+
+def checkpoint_dir(phase: str) -> Path:
+    d = CHECKPOINT_ROOT / phase
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def patch_unsloth_telemetry() -> None:
+    """No-op Unsloth's HF stats-endpoint — hängt in Colab/RunPod ~120s."""
+    import unsloth.models._utils as _u
+    _u._get_statistics = lambda *a, **kw: None
+    _u.time_limited_stats_check = lambda *a, **kw: None
