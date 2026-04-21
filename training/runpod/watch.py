@@ -526,18 +526,18 @@ def cost_panel() -> Panel:
     if anchor:
         elapsed = (datetime.now() - anchor).total_seconds()
         current_cost = HOURLY_RATE * elapsed / 3600
-        t.add_row("Bisher", f"[bold]${current_cost:.2f}[/bold]")
+        t.add_row("So far", f"[bold]${current_cost:.2f}[/bold]")
 
         avg = (sum(TRAIN.step_times) / len(TRAIN.step_times)) if TRAIN.step_times else 0
         remaining = max(TRAIN.total_steps - TRAIN.current_step, 0) if TRAIN.total_steps else 0
         eta = remaining * avg if avg else 0
         if eta:
             projected_total = HOURLY_RATE * (elapsed + eta) / 3600
-            t.add_row("Projektion", f"${projected_total:.2f}")
-            t.add_row("Verbleibend", f"${HOURLY_RATE * eta / 3600:.2f}")
+            t.add_row("Projection", f"${projected_total:.2f}")
+            t.add_row("Remaining", f"${HOURLY_RATE * eta / 3600:.2f}")
     else:
-        t.add_row("Bisher", "[dim]—[/dim]")
-    return Panel(t, title="[bold]Kosten[/bold]", border_style="blue")
+        t.add_row("So far", "[dim]—[/dim]")
+    return Panel(t, title="[bold]Cost[/bold]", border_style="blue")
 
 def checkpoint_panel() -> Panel:
     t = Table.grid(padding=(0, 2))
