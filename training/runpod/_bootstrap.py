@@ -42,6 +42,60 @@ def _load_env_file(path: Path) -> None:
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
+def _backport_torch_compat() -> None:
+    """Back-port torch 2.5 APIs that transformers 5.x uses but torch 2.4 lacks.
+
+    RunPod H100 base images ship torch 2.4.1, but transformers >=5.0 calls
+    `model.set_submodule(...)` during the bitsandbytes 4-bit integration
+    (transformers/integrations/bitsandbytes.py). That method landed in
+    torch 2.5 — without it, `FastLanguageModel.from_pretrained` dies with:
+
+        AttributeError: 'Qwen3MoeForCausalLM' object has no attribute 'set_submodule'
+
+    Idempotent: bails out if torch already provides the attribute, so it's
+    safe to call from both `bootstrap()` and `apply_gpu_optims()`.
+    """
+    try:
+        import torch.nn as nn
+    except ImportError:
+        return  # torch not installed yet — bootstrap() will retry post-install
+
+    if hasattr(nn.Module, "set_submodule"):
+        return
+
+    def set_submodule(
+        self,
+        target: str,
+        module: "nn.Module",
+        strict: bool = False,
+    ) -> None:
+        # Signature mirrors pytorch 2.5's nn.Module.set_submodule.
+        if not isinstance(target, str):
+            raise TypeError(
+                f"`target` must be a string, got {type(target).__name__}"
+            )
+        if target == "":
+            raise ValueError("Cannot set the submodule without a target name!")
+
+        atoms = target.split(".")
+        name = atoms[-1]
+        parent_path = ".".join(atoms[:-1])
+        parent = self.get_submodule(parent_path) if parent_path else self
+
+        if strict and not hasattr(parent, name):
+            raise AttributeError(
+                f"{parent._get_name()} has no attribute `{name}`"
+            )
+        if not isinstance(module, nn.Module):
+            raise TypeError(
+                f"`module` must be an nn.Module, got {type(module).__name__}"
+            )
+        setattr(parent, name, module)
+
+    nn.Module.set_submodule = set_submodule
+    print("torch compat: backported nn.Module.set_submodule (torch <2.5)")
+
+
 def bootstrap(*, install: bool = True) -> Path:
     _load_env_file(WORKSPACE / ".env")
 
@@ -84,6 +138,8 @@ def bootstrap(*, install: bool = True) -> Path:
         )
     os.chdir(training)
     print(f"cwd = {training}")
+    # Patch early: greift bevor transformers/unsloth importiert werden.
+    _backport_torch_compat()
     return training
 
 
@@ -96,18 +152,7 @@ def apply_gpu_optims() -> None:
         import torch._inductor.config  # noqa: F401
     except Exception:
         pass
-    # torch 2.4 fehlt nn.Module.set_submodule (ab 2.5), transformers 5.x braucht es.
-    import torch.nn as _nn
-    if not hasattr(_nn.Module, "set_submodule"):
-        def _set_submodule(self, target: str, module: _nn.Module) -> None:
-            atoms = target.split(".")
-            if len(atoms) == 1:
-                setattr(self, atoms[0], module)
-                return
-            parent = self.get_submodule(".".join(atoms[:-1]))
-            setattr(parent, atoms[-1], module)
-        _nn.Module.set_submodule = _set_submodule
-        print("torch compat: nn.Module.set_submodule backported")
+    _backport_torch_compat()
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
