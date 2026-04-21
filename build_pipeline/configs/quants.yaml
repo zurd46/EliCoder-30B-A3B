@@ -1,7 +1,7 @@
-model_name: coder-16b-dyn
-display_name: CoderLLM 16B Dynamic
+model_name: EliCoder-30b-a3b
+display_name: EliCoder 30B-A3B
 base:
-  hf_repo: zurd46/coder-16b-dyn-base-fp16
+  hf_repo: zurd46/EliCoder-30b-a3b
   revision: main
   license: apache-2.0
 
@@ -44,7 +44,7 @@ mlx_quants:
 
 hf_upload:
   owner: zurd46
-  repo_prefix: coder-16b-dyn
+  repo_prefix: EliCoder-30B-A3B
   private: false
   default_tags:
     - code
