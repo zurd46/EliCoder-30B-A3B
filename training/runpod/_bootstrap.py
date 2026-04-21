@@ -23,6 +23,13 @@ PIP_PACKAGES = [
     "huggingface_hub>=0.25", "tqdm",
 ]
 
+# Pod-Images kommen teils mit torchao vorinstalliert, das `torch.int1`
+# erwartet (torch >=2.6). Wir pinnen zurück auf eine torch-2.4/2.5-kompatible
+# Version, damit der Transformers-Import nicht bricht.
+PIP_PINS_PRE = [
+    "torchao==0.7.0",
+]
+
 
 def _load_env_file(path: Path) -> None:
     if not path.exists():
@@ -53,6 +60,12 @@ def bootstrap(*, install: bool = True) -> Path:
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 
     if install and not DEPS_MARKER.exists():
+        print("pinning torchao (torch.int1 conflict fix) …")
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q",
+             "--force-reinstall", "--no-deps", *PIP_PINS_PRE],
+            check=True,
+        )
         print("installing pip deps (once per pod) …")
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", *PIP_PACKAGES],
@@ -83,6 +96,18 @@ def apply_gpu_optims() -> None:
         import torch._inductor.config  # noqa: F401
     except Exception:
         pass
+    # torch 2.4 fehlt nn.Module.set_submodule (ab 2.5), transformers 5.x braucht es.
+    import torch.nn as _nn
+    if not hasattr(_nn.Module, "set_submodule"):
+        def _set_submodule(self, target: str, module: _nn.Module) -> None:
+            atoms = target.split(".")
+            if len(atoms) == 1:
+                setattr(self, atoms[0], module)
+                return
+            parent = self.get_submodule(".".join(atoms[:-1]))
+            setattr(parent, atoms[-1], module)
+        _nn.Module.set_submodule = _set_submodule
+        print("torch compat: nn.Module.set_submodule backported")
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True
