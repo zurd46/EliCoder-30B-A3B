@@ -16,6 +16,9 @@ CACHE_ROOT = WORKSPACE / "hf_cache"
 DEPS_MARKER = WORKSPACE / ".deps_installed"
 
 PIP_PACKAGES = [
+    # torchao 0.8+ braucht torch.int1 (torch >=2.6). Image hat torch 2.4 →
+    # Pin muss im Main-Install drin sein, sonst upgradet pip den Pre-Install weg.
+    "torchao==0.7.0",
     "unsloth @ git+https://github.com/unslothai/unsloth.git",
     "unsloth_zoo",
     "trl>=0.12", "transformers>=4.46", "datasets>=3.0",
@@ -23,9 +26,9 @@ PIP_PACKAGES = [
     "huggingface_hub>=0.25", "tqdm",
 ]
 
-# Pod-Images kommen teils mit torchao vorinstalliert, das `torch.int1`
-# erwartet (torch >=2.6). Wir pinnen zurück auf eine torch-2.4/2.5-kompatible
-# Version, damit der Transformers-Import nicht bricht.
+# Pre-install torchao isoliert (--no-deps), damit der Main-Resolver es als
+# bereits-satisfied sieht und nicht upgradet. Belt-and-suspenders mit dem
+# Pin in PIP_PACKAGES.
 PIP_PINS_PRE = [
     "torchao==0.7.0",
 ]
