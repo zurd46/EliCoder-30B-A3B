@@ -23,8 +23,8 @@ from huggingface_hub import HfApi, create_repo
 TOK = os.environ["HF_TOKEN"]
 OWNER = os.environ.get("CODERLLM_HF_OWNER", "zurd46")
 BASE = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
-ADAPTER = f"{OWNER}/EliCoder-30b-a3b-LoRA-LongCtx"
-MERGED_REPO = f"{OWNER}/EliCoder-30b-a3b"
+ADAPTER = f"{OWNER}/EliCoder-30B-A3B-LoRA-LongCtx"
+MERGED_REPO = f"{OWNER}/EliCoder-30B-A3B"
 OUT = Path("/workspace/merged")
 
 model, tokenizer = FastLanguageModel.from_pretrained(

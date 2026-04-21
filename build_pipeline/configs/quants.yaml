@@ -1,7 +1,7 @@
-model_name: EliCoder-30b-a3b
+model_name: EliCoder-30B-A3B
 display_name: EliCoder 30B-A3B
 base:
-  hf_repo: zurd46/EliCoder-30b-a3b
+  hf_repo: zurd46/EliCoder-30B-A3B
   revision: main
   license: apache-2.0
 

@@ -39,5 +39,5 @@ training:
   dataloader_pin_memory: false
 
 output:
-  hf_repo: zurd46/EliCoder-30b-a3b-LoRA-SFT
+  hf_repo: zurd46/EliCoder-30B-A3B-LoRA-SFT
   local_dir: /workspace/lora-sft

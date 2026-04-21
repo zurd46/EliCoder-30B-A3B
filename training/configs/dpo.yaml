@@ -1,5 +1,5 @@
 base_model: Qwen/Qwen3-Coder-30B-A3B-Instruct
-adapter_repo: zurd46/EliCoder-30b-a3b-LoRA-SFT
+adapter_repo: zurd46/EliCoder-30B-A3B-LoRA-SFT
 
 training:
   dataset: zurd46/coder-16b-dyn-dpo
@@ -21,5 +21,5 @@ training:
   seed: 42
 
 output:
-  hf_repo: zurd46/EliCoder-30b-a3b-LoRA-DPO
+  hf_repo: zurd46/EliCoder-30B-A3B-LoRA-DPO
   local_dir: /workspace/lora-dpo

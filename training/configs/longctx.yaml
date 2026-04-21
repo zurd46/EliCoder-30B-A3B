@@ -1,5 +1,5 @@
 base_model: Qwen/Qwen3-Coder-30B-A3B-Instruct
-adapter_repo: zurd46/EliCoder-30b-a3b-LoRA-DPO
+adapter_repo: zurd46/EliCoder-30B-A3B-LoRA-DPO
 
 rope:
   rope_scaling_type: yarn
@@ -25,5 +25,5 @@ training:
   gradient_checkpointing: true
 
 output:
-  hf_repo: zurd46/EliCoder-30b-a3b-LoRA-LongCtx
+  hf_repo: zurd46/EliCoder-30B-A3B-LoRA-LongCtx
   local_dir: /workspace/lora-longctx
