@@ -600,20 +600,27 @@ def log_panel() -> Panel:
             body.append(ln[-240:] + "\n", style=style)
     return Panel(body, title=f"[bold]{LOG_PATH} (recent lines)[/bold]", border_style="white")
 
-def build_view() -> Group:
-    top = Layout()
-    top.split_row(
+def build_view() -> Layout:
+    # One root Layout with three stacked rows. Using size= for the two metric
+    # rows so they can't collapse to 0 when the log panel is large.
+    root = Layout()
+    root.split_column(
+        Layout(name="top", size=10),   # header + metrics + GPU
+        Layout(name="mid", size=7),    # sparklines + cost + checkpoints
+        Layout(name="log"),            # log tail takes the remaining height
+    )
+    root["top"].split_row(
         Layout(header_panel(), name="h", ratio=2),
         Layout(metrics_panel(), name="m", ratio=2),
         Layout(gpu_panel(), name="g", ratio=2),
     )
-    mid = Layout()
-    mid.split_row(
+    root["mid"].split_row(
         Layout(loss_panel(), name="loss", ratio=3),
         Layout(cost_panel(), name="cost", ratio=1),
         Layout(checkpoint_panel(), name="ckpt", ratio=2),
     )
-    return Group(top, mid, log_panel())
+    root["log"].update(log_panel())
+    return root
 
 # ---------- Main ----------
 def preflight_ssh(console: Console) -> bool:
