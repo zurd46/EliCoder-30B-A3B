@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Training / ML artefacts
+checkpoints/
+wandb/
+*.ckpt
+*.bin
+*.safetensors
+training/unsloth_compiled_cache/
+
+# RunPod / local state
+.deps_installed
+*.log
+/workspace/
+
+# OS
+.DS_Store
+Thumbs.db
