@@ -96,6 +96,41 @@ def _backport_torch_compat() -> None:
     print("torch compat: backported nn.Module.set_submodule (torch <2.5)")
 
 
+def _configure_moe_backend() -> None:
+    """Pick an Unsloth MoE backend compatible with the installed triton.
+
+    Unsloth's default `unsloth_triton` grouped-GEMM path uses
+    `tl.make_tensor_descriptor` (triton >=3.2, ships with torch >=2.6).
+    RunPod torch 2.4.1 images ship triton 3.0 → kernel-compile fails with:
+
+        AttributeError: module 'triton.language' has no attribute 'make_tensor_descriptor'
+
+    `select_moe_backend()` in unsloth_zoo is `@lru_cache`d, so the env var
+    must be set *before* the first MoE forward. We set it here in bootstrap,
+    long before unsloth is imported.
+
+    Respects user override — set UNSLOTH_MOE_BACKEND yourself to force
+    `grouped_mm` (torch >=2.8) or `unsloth_triton` (triton >=3.2).
+    """
+    if os.environ.get("UNSLOTH_MOE_BACKEND"):
+        print(f"UNSLOTH_MOE_BACKEND (user-set): {os.environ['UNSLOTH_MOE_BACKEND']}")
+        return
+    try:
+        import triton.language as tl
+    except ImportError:
+        return  # no triton installed — MoE won't run anyway
+    has_tma = hasattr(tl, "make_tensor_descriptor") or hasattr(
+        tl, "_experimental_make_tensor_descriptor"
+    )
+    if has_tma:
+        return  # triton can handle unsloth's TMA kernel, leave default
+    os.environ["UNSLOTH_MOE_BACKEND"] = "native_torch"
+    print(
+        "UNSLOTH_MOE_BACKEND=native_torch "
+        "(triton <3.2 — no tl.make_tensor_descriptor, falling back from triton MoE)"
+    )
+
+
 def bootstrap(*, install: bool = True) -> Path:
     _load_env_file(WORKSPACE / ".env")
 
@@ -140,6 +175,7 @@ def bootstrap(*, install: bool = True) -> Path:
     print(f"cwd = {training}")
     # Patch early: greift bevor transformers/unsloth importiert werden.
     _backport_torch_compat()
+    _configure_moe_backend()
     return training
 
 
@@ -153,6 +189,7 @@ def apply_gpu_optims() -> None:
     except Exception:
         pass
     _backport_torch_compat()
+    _configure_moe_backend()
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.backends.cudnn.benchmark = True

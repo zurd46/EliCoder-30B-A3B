@@ -249,8 +249,6 @@ class Agent:
 
             if self.s.stream:
                 buf: list[str] = []
-                def on_tok(t: str) -> None:
-                    buf.append(t)
                 with Live(Panel("", title=f"coder · streaming [{step+1}]", border_style="magenta"),
                           console=self.console, refresh_per_second=12, transient=True) as live:
                     def on_tok_live(t: str) -> None:
