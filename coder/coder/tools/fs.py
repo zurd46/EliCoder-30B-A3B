@@ -143,7 +143,7 @@ def register(r: Registry, s: Settings) -> None:
     for tool in [
         Tool("read_file", "Read a text file; optional line range.",
              {"type": "object", "properties": {"path": {"type": "string"}, "start": {"type": "integer"}, "end": {"type": "integer"}}, "required": ["path"]},
-             read_file, "safe"),
+             read_file, "safe", cacheable=True),
         Tool("write_file", "Create or overwrite a file.",
              {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
              write_file, "standard"),
@@ -173,15 +173,15 @@ def register(r: Registry, s: Settings) -> None:
              delete_dir, "standard", needs_confirmation=True),
         Tool("list_dir", "List a directory tree up to given depth.",
              {"type": "object", "properties": {"path": {"type": "string"}, "depth": {"type": "integer"}}, "required": []},
-             list_dir, "safe"),
+             list_dir, "safe", cacheable=True),
         Tool("glob", "Glob files with a pattern (e.g. **/*.ts).",
              {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]},
-             glob_search, "safe"),
+             glob_search, "safe", cacheable=True),
         Tool("grep", "Search file contents.",
              {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"}, "is_regex": {"type": "boolean"}, "max_results": {"type": "integer"}}, "required": ["pattern"]},
-             grep, "safe"),
+             grep, "safe", cacheable=True),
         Tool("file_info", "Stat a file.",
              {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-             file_info, "safe"),
+             file_info, "safe", cacheable=True),
     ]:
         r.register(tool)
