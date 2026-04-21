@@ -10,11 +10,8 @@ lora:
     - k_proj
     - v_proj
     - o_proj
-    - gate_proj
-    - up_proj
-    - down_proj
   use_rslora: true
-  finetune_all_experts: true
+  finetune_all_experts: false
 
 training:
   dataset: zurd46/coder-16b-dyn-sft
