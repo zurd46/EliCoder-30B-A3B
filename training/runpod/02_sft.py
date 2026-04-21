@@ -37,12 +37,24 @@ CKPT = checkpoint_dir("sft-phase-a")
 print(f"checkpoints → {CKPT}")
 
 # H100-NVL (94GB) Overrides — doppelter Batch, halbe Accum
+# Nur wenn der gefusete Triton-MoE-Kernel aktiv ist. Der native_torch-Fallback
+# (Loop über alle Experten) braucht pro Token deutlich mehr VRAM und OOMt bei bsz=2.
 TRAIN = dict(CFG["training"])
 gpu_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-if gpu_total >= 88:
+moe_backend = os.environ.get("UNSLOTH_MOE_BACKEND", "")
+if gpu_total >= 88 and moe_backend != "native_torch":
     TRAIN["per_device_train_batch_size"] = 2
     TRAIN["gradient_accumulation_steps"] = max(1, TRAIN["gradient_accumulation_steps"] // 2)
     print(f"H100-NVL detected ({gpu_total:.0f}GB) — bsz=2, grad_accum={TRAIN['gradient_accumulation_steps']}")
+elif moe_backend == "native_torch":
+    # Native MoE-Loop erzeugt Aktivierungen für alle 128 Experten × top_k.
+    # Ohne gradient-checkpointing OOM-ts sofort bei 30B auf 93GB. Erzwingen.
+    TRAIN["gradient_checkpointing"] = True
+    print(
+        f"H100-NVL ({gpu_total:.0f}GB) + native_torch MoE — keeping "
+        f"bsz={TRAIN['per_device_train_batch_size']}, grad_accum={TRAIN['gradient_accumulation_steps']}, "
+        "forcing gradient_checkpointing=True (native loop needs it)"
+    )
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=CFG["base_model"],
