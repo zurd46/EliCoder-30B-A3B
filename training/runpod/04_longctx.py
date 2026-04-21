@@ -71,23 +71,34 @@ def fmt(example):
 
 ds = ds.map(fmt, remove_columns=ds.column_names)
 
+T = CFG["training"]
+eval_frac = float(T.get("eval_fraction", 0) or 0)
+eval_ds = None
+if eval_frac > 0:
+    split = ds.train_test_split(test_size=eval_frac, seed=T.get("seed", 42))
+    ds, eval_ds = split["train"], split["test"]
+    print(f"eval split: {len(ds):,} train / {len(eval_ds):,} eval ({eval_frac:.1%})")
+
 args = SFTConfig(
     output_dir=str(CKPT),
-    per_device_train_batch_size=CFG["training"]["per_device_train_batch_size"],
-    gradient_accumulation_steps=CFG["training"]["gradient_accumulation_steps"],
-    num_train_epochs=CFG["training"]["num_train_epochs"],
-    learning_rate=CFG["training"]["learning_rate"],
-    lr_scheduler_type=CFG["training"]["lr_scheduler_type"],
-    warmup_ratio=CFG["training"]["warmup_ratio"],
-    bf16=CFG["training"]["bf16"],
-    optim=CFG["training"]["optim"],
-    gradient_checkpointing=CFG["training"]["gradient_checkpointing"],
-    max_seq_length=CFG["training"]["max_seq_length"],
+    per_device_train_batch_size=T["per_device_train_batch_size"],
+    gradient_accumulation_steps=T["gradient_accumulation_steps"],
+    num_train_epochs=T["num_train_epochs"],
+    learning_rate=T["learning_rate"],
+    lr_scheduler_type=T["lr_scheduler_type"],
+    warmup_ratio=T["warmup_ratio"],
+    bf16=T["bf16"],
+    optim=T["optim"],
+    gradient_checkpointing=T["gradient_checkpointing"],
+    max_seq_length=T["max_seq_length"],
     packing=False,
     report_to="wandb" if os.environ.get("WANDB_API_KEY") else "none",
     dataset_text_field="text",
-    save_steps=100,
-    save_total_limit=3,
+    save_steps=T.get("save_steps", 50),
+    save_total_limit=T.get("save_total_limit", 2),
+    seed=T.get("seed", 42),
+    eval_strategy=T.get("eval_strategy", "no") if eval_ds is not None else "no",
+    per_device_eval_batch_size=T.get("per_device_eval_batch_size", 1),
     push_to_hub=True,
     hub_model_id=CFG["output"]["hf_repo"],
     hub_strategy="checkpoint",
@@ -95,7 +106,11 @@ args = SFTConfig(
     hub_private_repo=True,
 )
 
-trainer = SFTTrainer(model=model, tokenizer=tokenizer, train_dataset=ds, args=args)
+trainer = SFTTrainer(
+    model=model, tokenizer=tokenizer,
+    train_dataset=ds, eval_dataset=eval_ds,
+    args=args,
+)
 
 last_ckpt = get_last_checkpoint(str(CKPT))
 if last_ckpt:
