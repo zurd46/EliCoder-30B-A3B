@@ -36,13 +36,41 @@ try:
 except ImportError:
     sys.exit("rich fehlt — installiere mit: pip install rich")
 
-# ---------- Pod-Verbindung (aus ENV überschreibbar) ----------
-SSH_HOST = os.environ.get("POD_HOST", "38.143.35.131")
-SSH_PORT = os.environ.get("POD_PORT", "15960")
+# ---------- Pod-Verbindung ----------
+# POD_ID ist die stabile Identität — IP/Port werden bei jedem Stop/Start neu vergeben.
+# Wir detecten sie via `runpodctl get pod <id>`, sodass der Monitor ohne ENV-Anpassung
+# nach jedem Pod-Restart wieder funktioniert. ENV-Overrides gehen weiterhin.
+POD_ID = os.environ.get("POD_ID", "alpqgkmttz9dhl")
 SSH_USER = os.environ.get("POD_USER", "root")
 SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.runpod/ssh/RunPod-Key-Go"))
 LOG_PATH = os.environ.get("POD_LOG", "/workspace/sft.log")
 GPU_POLL_SEC = float(os.environ.get("GPU_POLL_SEC", "2"))
+
+_PORT_RE = re.compile(r"(\d+\.\d+\.\d+\.\d+):(\d+)->22\s*\(pub,tcp\)")
+
+def detect_ssh_endpoint() -> tuple[str, str]:
+    """Liefert (host, port) fürs SSH — ENV-Overrides haben Priorität, sonst runpodctl."""
+    host = os.environ.get("POD_HOST")
+    port = os.environ.get("POD_PORT")
+    if host and port:
+        return host, port
+    try:
+        out = subprocess.check_output(
+            ["runpodctl", "get", "pod", POD_ID, "-a"],
+            stderr=subprocess.STDOUT, timeout=15, text=True,
+        )
+        m = _PORT_RE.search(out)
+        if m:
+            return m.group(1), m.group(2)
+    except FileNotFoundError:
+        sys.exit("runpodctl nicht installiert — entweder installieren oder POD_HOST/POD_PORT setzen")
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"runpodctl-Fehler: {(e.output or '').strip()[:200]}")
+    except subprocess.TimeoutExpired:
+        sys.exit("runpodctl get pod → Timeout (>15s)")
+    sys.exit(f"konnte pub-tcp-SSH-Port für {POD_ID} nicht aus runpodctl-Output lesen")
+
+SSH_HOST, SSH_PORT = detect_ssh_endpoint()
 
 SSH_BASE = [
     "ssh", "-i", SSH_KEY,
