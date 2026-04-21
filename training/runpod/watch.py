@@ -548,10 +548,10 @@ def checkpoint_panel() -> Panel:
         ago = ""
         if TRAIN.last_save_at:
             secs = (datetime.now() - TRAIN.last_save_at).total_seconds()
-            ago = f"  vor {fmt_td(secs)}"
-        t.add_row("Letzter", f"Step {TRAIN.last_save_step}{ago}")
+            ago = f"  ({fmt_td(secs)} ago)"
+        t.add_row("Last", f"step {TRAIN.last_save_step}{ago}")
     else:
-        t.add_row("Saves", "[dim]noch keiner[/dim]")
+        t.add_row("Saves", "[dim]none yet[/dim]")
 
     if TRAIN.current_step > 0 and TRAIN.total_steps > 0:
         next_save = ((TRAIN.current_step // SAVE_STEPS) + 1) * SAVE_STEPS
@@ -559,15 +559,15 @@ def checkpoint_panel() -> Panel:
             steps_to_go = next_save - TRAIN.current_step
             avg = (sum(TRAIN.step_times) / len(TRAIN.step_times)) if TRAIN.step_times else 0
             eta_save = fmt_td(steps_to_go * avg) if avg else "—"
-            t.add_row("Nächster", f"Step {next_save}  (in ~{eta_save})")
+            t.add_row("Next", f"step {next_save}  (in ~{eta_save})")
 
     if TRAIN.hub_push_last:
         secs = (datetime.now() - TRAIN.hub_push_last).total_seconds()
-        t.add_row("Hub-Push", f"vor {fmt_td(secs)}")
+        t.add_row("Hub push", f"{fmt_td(secs)} ago")
 
     if DISK.alive:
         if DISK.ckpt_size_gb > 0:
-            t.add_row("Ckpt-Size", f"{DISK.ckpt_size_gb:.1f} GB")
+            t.add_row("Ckpt size", f"{DISK.ckpt_size_gb:.1f} GB")
         if DISK.workspace_total_gb:
             used_pct = DISK.workspace_used_gb / DISK.workspace_total_gb * 100
             color = "red" if used_pct > 90 else "yellow" if used_pct > 75 else "green"
@@ -577,12 +577,12 @@ def checkpoint_panel() -> Panel:
                 f"({used_pct:.0f}%)[/{color}]",
             )
         if DISK.hf_cache_gb:
-            t.add_row("HF-Cache", f"{DISK.hf_cache_gb:.1f} GB")
-    return Panel(t, title="[bold]Checkpoints & Disk[/bold]", border_style="cyan")
+            t.add_row("HF cache", f"{DISK.hf_cache_gb:.1f} GB")
+    return Panel(t, title="[bold]Checkpoints & disk[/bold]", border_style="cyan")
 
 def log_panel() -> Panel:
     if not TRAIN.log_tail:
-        body = Text("warte auf Log-Zeilen…", style="dim")
+        body = Text("waiting for log lines…", style="dim")
     else:
         lines = list(TRAIN.log_tail)[-16:]
         body = Text()
@@ -598,7 +598,7 @@ def log_panel() -> Panel:
             elif "/" in ln and "it/s" in ln or "s/it" in ln:
                 style = "cyan"
             body.append(ln[-240:] + "\n", style=style)
-    return Panel(body, title=f"[bold]{LOG_PATH} (letzte Zeilen)[/bold]", border_style="white")
+    return Panel(body, title=f"[bold]{LOG_PATH} (recent lines)[/bold]", border_style="white")
 
 def build_view() -> Group:
     top = Layout()
@@ -617,35 +617,35 @@ def build_view() -> Group:
 
 # ---------- Main ----------
 def preflight_ssh(console: Console) -> bool:
-    """Teste SSH-Verbindung bevor TUI startet — zeigt klaren Fehler falls Key/Host falsch."""
-    console.print(f"[dim]Preflight: teste SSH zu {SSH_USER}@{SSH_HOST}:{SSH_PORT}…[/dim]")
+    """Test the SSH connection before launching the TUI — clear error on bad key/host."""
+    console.print(f"[dim]Preflight: testing SSH to {SSH_USER}@{SSH_HOST}:{SSH_PORT}…[/dim]")
     cmd = SSH_BASE + ["echo ok"]
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15, text=True)
         if "ok" in out:
             console.print("[green]✓ SSH ok[/green]")
             return True
-        console.print(f"[red]SSH unerwartete Ausgabe:[/red] {out!r}")
+        console.print(f"[red]unexpected SSH output:[/red] {out!r}")
         return False
     except subprocess.CalledProcessError as e:
-        console.print("[red]✗ SSH fehlgeschlagen:[/red]")
+        console.print("[red]✗ SSH failed:[/red]")
         console.print(f"[red]{e.output.strip() if e.output else f'rc={e.returncode}'}[/red]")
         return False
     except subprocess.TimeoutExpired:
-        console.print("[red]✗ SSH-Timeout nach 15s[/red]")
+        console.print("[red]✗ SSH timeout after 15s[/red]")
         return False
 
 def main() -> None:
-    # Fallback-Konsole (force_terminal), damit Rich auch in VSCode-Terminal live rendert
+    # force_terminal so Rich's Live still renders inside the VSCode integrated terminal.
     console = Console(force_terminal=True)
 
     if not preflight_ssh(console):
-        console.print("\n[bold yellow]Hinweis:[/bold yellow] prüfe POD_HOST/POD_PORT/POD_KEY-ENV oder teste manuell:")
+        console.print("\n[bold yellow]Hint:[/bold yellow] check POD_HOST / POD_PORT / POD_KEY env vars, or try manually:")
         console.print(f"[dim]  ssh -i {SSH_KEY} -p {SSH_PORT} {SSH_USER}@{SSH_HOST} 'echo ok'[/dim]")
         sys.exit(1)
 
-    console.print(f"[dim]starte Live-Monitor — log={LOG_PATH}  gpu-poll={GPU_POLL_SEC}s[/dim]")
-    console.print("[dim]Ctrl+C zum Beenden · Training im Pod läuft unabhängig weiter[/dim]\n")
+    console.print(f"[dim]starting live monitor — log={LOG_PATH}  gpu-poll={GPU_POLL_SEC}s  disk-poll={DISK_POLL_SEC}s[/dim]")
+    console.print("[dim]Ctrl+C to quit · training keeps running on the pod[/dim]\n")
     time.sleep(0.6)
 
     signal.signal(signal.SIGINT, lambda *_: STOP.set())
@@ -659,8 +659,8 @@ def main() -> None:
     t_disk.start()
 
     try:
-        # screen=True → alt-screen buffer, sauberes Clearing in jedem Terminal
-        # auto_refresh=True → Live refresht selbst, kein manuelles update() nötig
+        # screen=True → alt-screen buffer, clean redraws in any terminal
+        # auto_refresh=True → Live refreshes itself, no manual update() needed
         with Live(build_view(), console=console, refresh_per_second=4,
                   screen=True, auto_refresh=True) as live:
             while not STOP.is_set():
@@ -670,7 +670,7 @@ def main() -> None:
         STOP.set()
     finally:
         STOP.set()
-        console.print("\n[dim]Monitor beendet — Training im Pod läuft weiter.[/dim]")
+        console.print("\n[dim]monitor stopped — training keeps running on the pod.[/dim]")
 
 if __name__ == "__main__":
     main()
