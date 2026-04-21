@@ -116,18 +116,24 @@ def _configure_moe_backend() -> None:
         print(f"UNSLOTH_MOE_BACKEND (user-set): {os.environ['UNSLOTH_MOE_BACKEND']}")
         return
     try:
+        import triton
         import triton.language as tl
+        tver = getattr(triton, "__version__", "?")
     except ImportError:
-        return  # no triton installed — MoE won't run anyway
-    has_tma = hasattr(tl, "make_tensor_descriptor") or hasattr(
-        tl, "_experimental_make_tensor_descriptor"
-    )
+        print("UNSLOTH_MOE_BACKEND: triton not installed — skipping autoconfig")
+        return
+    # Unsloth's grouped-GEMM kernel literally references `tl.make_tensor_descriptor`
+    # (the non-experimental name, triton >=3.2). Triton 3.0 only has
+    # `_experimental_make_tensor_descriptor`, which won't satisfy the AST lookup
+    # — so *only* checking the exact attribute the kernel uses is correct here.
+    has_tma = hasattr(tl, "make_tensor_descriptor")
     if has_tma:
-        return  # triton can handle unsloth's TMA kernel, leave default
+        print(f"UNSLOTH_MOE_BACKEND=auto (triton {tver} has tl.make_tensor_descriptor)")
+        return
     os.environ["UNSLOTH_MOE_BACKEND"] = "native_torch"
     print(
-        "UNSLOTH_MOE_BACKEND=native_torch "
-        "(triton <3.2 — no tl.make_tensor_descriptor, falling back from triton MoE)"
+        f"UNSLOTH_MOE_BACKEND=native_torch "
+        f"(triton {tver} lacks tl.make_tensor_descriptor → native loop fallback)"
     )
 
 
