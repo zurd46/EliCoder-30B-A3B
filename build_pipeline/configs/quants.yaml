@@ -1,17 +1,11 @@
 model_name: coder-16b-dyn
 display_name: CoderLLM 16B Dynamic
 base:
-  hf_repo: Qwen/Qwen3-Coder-30B-A3B-Instruct
+  hf_repo: zurd46/coder-16b-dyn-base-fp16
   revision: main
   license: apache-2.0
 
-prebuilt:
-  gguf_repo: unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF
-  mlx_repos:
-    mlx-8bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-8bit
-    mlx-6bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-6bit
-    mlx-4bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
-    mlx-3bit: mlx-community/Qwen3-Coder-30B-A3B-Instruct-3bit
+prebuilt: {}
 
 gguf_quants:
   - id: UD-Q4_K_XL

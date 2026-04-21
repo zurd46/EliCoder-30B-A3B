@@ -147,15 +147,29 @@ out = model.generate(inputs, max_new_tokens=512, temperature=0.2)
 print(tokenizer.decode(out[0][inputs.shape[1]:], skip_special_tokens=True))
 ```
 
-### With MLX (Apple Silicon)
-Quantized MLX builds are published as sibling repos (4-bit / 6-bit / 8-bit):
+### With MLX (Apple Silicon, recommended for Mac)
+Quantized MLX builds are published as sibling repos:
+
+| Repo | Bits | Size | Use case |
+|---|---|---|---|
+| [`zurd46/coder-16b-dyn-mlx-4bit`](https://huggingface.co/zurd46/coder-16b-dyn-mlx-4bit) | 4 | ~16.5 GB | Default — fast on M-series Macs |
+| [`zurd46/coder-16b-dyn-mlx-3bit`](https://huggingface.co/zurd46/coder-16b-dyn-mlx-3bit) | 3 | ~12.8 GB | Tighter memory budget |
+
 ```bash
 pip install mlx-lm
 python -m mlx_lm.generate --model zurd46/coder-16b-dyn-mlx-4bit --prompt "Fix this function: ..."
 ```
 
 ### With llama.cpp / LM Studio
-GGUF quants (Q4_K_M, Q5_K_M, Q6_K, Q8_0) are published as sibling repos and are directly loadable in LM Studio on macOS.
+GGUF quants (Unsloth Dynamic 2.0, imatrix-calibrated) are published as sibling repos:
+
+| Repo | Type | Size | Use case |
+|---|---|---|---|
+| [`zurd46/coder-16b-dyn-gguf-UD-Q4_K_XL`](https://huggingface.co/zurd46/coder-16b-dyn-gguf-UD-Q4_K_XL) | Q4_K_M | ~17.7 GB | Default quality profile |
+| [`zurd46/coder-16b-dyn-gguf-UD-Q3_K_XL`](https://huggingface.co/zurd46/coder-16b-dyn-gguf-UD-Q3_K_XL) | Q3_K_L | ~13.8 GB | Long-context profile (more KV budget) |
+| [`zurd46/coder-16b-dyn-gguf-UD-IQ2_M`](https://huggingface.co/zurd46/coder-16b-dyn-gguf-UD-IQ2_M) | IQ2_M | ~10.8 GB | Fits 16 GB hardware |
+
+All GGUF repos ship a `model.yaml` for one-click LM Studio import.
 
 ## Limitations
 
