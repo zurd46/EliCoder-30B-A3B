@@ -22,15 +22,15 @@ training:
   gradient_accumulation_steps: 64
   learning_rate: 2.0e-5
   lr_scheduler_type: cosine
-  warmup_steps: 100
+  warmup_steps: 8
   weight_decay: 0.01
   optim: adamw_8bit
   bf16: true
   gradient_checkpointing: false
-  logging_steps: 10
+  logging_steps: 5
   save_strategy: steps
-  save_steps: 100
-  save_total_limit: 3
+  save_steps: 20
+  save_total_limit: 2
   seed: 42
   dataset_num_proc: 8
   packing: true
