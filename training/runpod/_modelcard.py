@@ -2,7 +2,7 @@
 Model card templates for HF Hub uploads.
 
 Two variants:
-  - MERGED_CARD  — for the final BF16 merged model repo
+  - MERGED_CARD  — for the final BF16 merged model repo (EliCoder-30B-A3B)
   - ADAPTER_CARD — for the intermediate LoRA adapter repos (SFT / DPO / LongCtx)
 
 Used by 05_export.py (merged card) and push_modelcards.py (all repos).
@@ -33,7 +33,7 @@ tags:
 - yarn
 ---
 
-# CoderLLM 16B-dyn (BF16 base)
+# EliCoder-30B-A3B
 
 A fine-tuned version of [Qwen/Qwen3-Coder-30B-A3B-Instruct](https://huggingface.co/Qwen/Qwen3-Coder-30B-A3B-Instruct) built as the in-house coding assistant for [impulsai.ch](https://impulsai.ch).
 
@@ -95,28 +95,34 @@ All training datasets are consolidated from public HuggingFace sources and pushe
 - Synthetic needle-in-haystack: randomly generated passphrases embedded in word-based haystacks of 32k / 64k / 128k / 200k tokens
 - Purpose: stabilize positional encodings after YaRN extension to 262k, not to teach new semantic skills
 
+Sequence lengths were empirically calibrated per phase (P99 token counts measured with the Qwen3-Coder tokenizer) to minimize truncation while cutting attention compute.
+
 ### Phase 2 — Supervised Fine-Tuning (SFT)
 - LoRA r=64, α=128 on `q_proj`, `k_proj`, `v_proj`, `o_proj`
 - `use_rslora=True` (rank-stabilized scaling)
-- Sequence packing at `max_seq_length=8192`
+- Sequence packing at `max_seq_length=6144` (P99 of SFT corpus ≈ 2.6k; <0.1% truncation)
 - Per-device batch 2 × gradient accumulation 32 → effective batch 64
 - Learning rate 2e-5, cosine schedule, 100 warmup steps, 1 epoch
-- Optimizer: 8-bit Paged AdamW, weight decay 0.01
-- Gradient checkpointing enabled (Unsloth kernels)
+- Optimizer: 8-bit AdamW, weight decay 0.01
+- Gradient checkpointing disabled (H100 NVL has VRAM headroom)
 - Output adapter → `zurd46/EliCoder-30B-A3B-LoRA-SFT`
 
 ### Phase 3 — Direct Preference Optimization (DPO)
 - Built on top of the SFT LoRA adapter
-- β = 0.1, learning rate 5e-6, cosine schedule
-- `max_seq_length=8192`, `max_prompt_length=8192`
-- Effective batch 32, 600 training steps
+- β = 0.05, learning rate 2e-6, cosine schedule, 5% warmup, 1 epoch
+- `max_seq_length=4096`, `max_prompt_length=1024` (P99 of DPO corpus ≈ 1.3k; 0% truncation)
+- Per-device batch 1 × gradient accumulation 32 → effective batch 32
+- Optimizer: 8-bit AdamW
+- Gradient checkpointing disabled
 - Output adapter → `zurd46/EliCoder-30B-A3B-LoRA-DPO`
 
 ### Phase 4 — Long-Context extension (YaRN)
 - Built on top of the DPO LoRA adapter
 - YaRN rope scaling: factor 4.0, original 65,536 → target 262,144 positions
+- Training `max_seq_length=40960` (covers the full 33k-token needle-in-haystack samples with headroom)
 - Layer-freeze: only transformer layers ≥ 30 are trainable
-- Learning rate 2e-5, 1 epoch on the synthetic LongCtx dataset
+- Learning rate 2e-5, 10% warmup, 1 epoch on the synthetic LongCtx dataset
+- Gradient checkpointing + paged 8-bit AdamW (VRAM-critical at 40k seq)
 - Output adapter → `zurd46/EliCoder-30B-A3B-LoRA-LongCtx`
 
 ### Phase 5 — Merge & export
@@ -188,8 +194,8 @@ All GGUF repos ship a `model.yaml` for one-click LM Studio import.
 ## Citation
 
 ```bibtex
-@misc{coderllm-16b-dyn,
-  title  = {CoderLLM 16B-dyn: a LoRA-tuned Qwen3-Coder for bilingual coding assistance},
+@misc{elicoder-30b-a3b,
+  title  = {EliCoder-30B-A3B: a LoRA-tuned Qwen3-Coder for bilingual coding assistance},
   author = {Zurm{\\"u}hle, Daniel},
   year   = {2026},
   url    = {https://huggingface.co/zurd46/EliCoder-30B-A3B},
@@ -218,7 +224,7 @@ tags:
 - {phase_tag}
 ---
 
-# CoderLLM 16B-dyn — {phase_name} LoRA adapter
+# EliCoder-30B-A3B — {phase_name} LoRA adapter
 
 {phase_summary}
 
@@ -238,6 +244,10 @@ This is an intermediate LoRA adapter in a multi-phase training pipeline. The fin
 | Trainable parameters | ~53M (0.17%) |
 | Training dataset | {dataset_ref} |
 | License | Apache-2.0 (inherited) |
+
+## Training hyperparameters
+
+{training_details}
 
 ## Training data
 
@@ -283,6 +293,14 @@ def adapter_card(phase: str) -> str:
             "starting_point": "`Qwen/Qwen3-Coder-30B-A3B-Instruct` (base)",
             "dataset_ref": "[`zurd46/EliCoder-Dataset-SFT`](https://huggingface.co/datasets/zurd46/EliCoder-Dataset-SFT) (~180k samples)",
             "adapter_repo": "zurd46/EliCoder-30B-A3B-LoRA-SFT",
+            "training_details": (
+                "- Sequence packing at `max_seq_length=6144` (P99 ≈ 2.6k tokens, <0.1% truncation)\n"
+                "- Per-device batch 2 × gradient accumulation 32 → effective batch 64\n"
+                "- Learning rate 2e-5, cosine schedule, 100 warmup steps, 1 epoch\n"
+                "- Optimizer: 8-bit AdamW, weight decay 0.01\n"
+                "- Gradient checkpointing disabled (H100 NVL headroom)\n"
+                "- `use_rslora=True` (rank-stabilized LoRA)"
+            ),
             "dataset_details": (
                 "Aggregated from seven public HuggingFace sources:\n\n"
                 "- `nvidia/Nemotron-SFT-OpenCode-v1` (40k) — NVIDIA-curated high-quality code SFT\n"
@@ -308,6 +326,13 @@ def adapter_card(phase: str) -> str:
             "starting_point": "[`zurd46/EliCoder-30B-A3B-LoRA-SFT`](https://huggingface.co/zurd46/EliCoder-30B-A3B-LoRA-SFT)",
             "dataset_ref": "[`zurd46/EliCoder-Dataset-DPO`](https://huggingface.co/datasets/zurd46/EliCoder-Dataset-DPO) (~70k preference pairs)",
             "adapter_repo": "zurd46/EliCoder-30B-A3B-LoRA-DPO",
+            "training_details": (
+                "- β = 0.05, learning rate 2e-6, cosine schedule, 5% warmup, 1 epoch\n"
+                "- `max_seq_length=4096`, `max_prompt_length=1024` (P99 ≈ 1.3k, 0% truncation)\n"
+                "- Per-device batch 1 × gradient accumulation 32 → effective batch 32\n"
+                "- Optimizer: 8-bit AdamW\n"
+                "- Gradient checkpointing disabled"
+            ),
             "dataset_details": (
                 "Aggregated from two public HuggingFace preference datasets:\n\n"
                 "- `Vezora/Code-Preference-Pairs` (50k) — buggy vs. fixed code pairs\n"
@@ -328,6 +353,14 @@ def adapter_card(phase: str) -> str:
             "starting_point": "[`zurd46/EliCoder-30B-A3B-LoRA-DPO`](https://huggingface.co/zurd46/EliCoder-30B-A3B-LoRA-DPO)",
             "dataset_ref": "[`zurd46/EliCoder-Dataset-LongCtx`](https://huggingface.co/datasets/zurd46/EliCoder-Dataset-LongCtx) (8k synthetic samples)",
             "adapter_repo": "zurd46/EliCoder-30B-A3B-LoRA-LongCtx",
+            "training_details": (
+                "- YaRN rope scaling: factor 4.0, original 65,536 → target 262,144 positions\n"
+                "- Training `max_seq_length=40960` (covers the longest 33k-token samples with headroom)\n"
+                "- Layer-freeze: only transformer layers ≥ 30 are trainable\n"
+                "- Learning rate 2e-5, cosine schedule, 10% warmup, 1 epoch\n"
+                "- Per-device batch 1 × gradient accumulation 16\n"
+                "- Optimizer: 8-bit paged AdamW + gradient checkpointing (VRAM-critical at 40k seq)"
+            ),
             "dataset_details": (
                 "Synthetic needle-in-haystack dataset: 8,000 samples with passphrases embedded in word-based "
                 "haystacks of 32k / 64k / 128k / 200k tokens. The goal is to stabilize positional encodings "
