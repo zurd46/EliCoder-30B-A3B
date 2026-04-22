@@ -159,11 +159,14 @@ STOP = threading.Event()
 
 # ---------- Parser ----------
 STEP_RE = re.compile(r"(\d+)\s*/\s*(\d+)\s*\[([^\]]+)\]")
-LOSS_RE = re.compile(r"'loss'\s*:\s*([0-9.eE+-]+)")
-LR_RE = re.compile(r"'learning_rate'\s*:\s*([0-9.eE+-]+)")
-GRAD_RE = re.compile(r"'grad_norm'\s*:\s*([0-9.eE+-]+)")
-EVAL_LOSS_RE = re.compile(r"'eval_loss'\s*:\s*([0-9.eE+-]+)")
-EVAL_RUNTIME_RE = re.compile(r"'eval_runtime'\s*:\s*([0-9.eE+-]+)")
+# Trainer logs numbers as either bare or quoted depending on log config.
+# Accept both: 'loss': 0.7 AND 'loss': '0.7'
+LOSS_RE = re.compile(r"'loss'\s*:\s*'?([0-9.eE+-]+)'?")
+LR_RE = re.compile(r"'learning_rate'\s*:\s*'?([0-9.eE+-]+)'?")
+GRAD_RE = re.compile(r"'grad_norm'\s*:\s*'?([0-9.eE+-]+)'?")
+EPOCH_RE = re.compile(r"'epoch'\s*:\s*'?([0-9.eE+-]+)'?")
+EVAL_LOSS_RE = re.compile(r"'eval_loss'\s*:\s*'?([0-9.eE+-]+)'?")
+EVAL_RUNTIME_RE = re.compile(r"'eval_runtime'\s*:\s*'?([0-9.eE+-]+)'?")
 TOTAL_STEPS_RE = re.compile(r"Total steps\s*=\s*([0-9,]+)")
 STEP_TIME_RE = re.compile(r"(\d+(?:\.\d+)?)(s|min)/it")
 SAVE_STEP_RE = re.compile(r"checkpoint-(\d+)")
@@ -202,11 +205,16 @@ def parse_log_line(line: str) -> None:
 
     # Only accept a step match if total == known total_steps — otherwise
     # "Loading weights: 531/531" and ds.map progress bars would all match.
+    # Fallback: if we're already in Training phase (loss seen) but total_steps
+    # was never parsed (e.g. the banner scrolled out of the tail buffer),
+    # accept any plausible X/Y with Y > 10 as the training total.
     is_train_step_line = False
-    if (m := STEP_RE.search(line)) and TRAIN.total_steps > 0:
+    if m := STEP_RE.search(line):
         step = int(m.group(1))
         total = int(m.group(2))
-        if total == TRAIN.total_steps:
+        if TRAIN.total_steps == 0 and TRAIN.phase == "Training" and total > 10 and step <= total:
+            TRAIN.total_steps = total
+        if TRAIN.total_steps > 0 and total == TRAIN.total_steps:
             is_train_step_line = True
             TRAIN.phase = "Training"
             if step > TRAIN.current_step:
@@ -226,6 +234,13 @@ def parse_log_line(line: str) -> None:
     if m := LOSS_RE.search(line):
         loss_val = float(m.group(1))
         TRAIN.last_loss = loss_val
+        # A 'loss' line proves we're in training — fix up phase/timers even if
+        # the "Total steps = N" banner was already out of the log tail buffer.
+        TRAIN.phase = "Training"
+        if TRAIN.training_started_at is None:
+            TRAIN.training_started_at = datetime.now()
+        if TRAIN.started_at is None:
+            TRAIN.started_at = datetime.now()
         if TRAIN.current_step > 0:
             # Only train loss — eval_loss has its own regex above.
             if not TRAIN.loss_history or TRAIN.loss_history[-1][0] != TRAIN.current_step:
@@ -278,7 +293,10 @@ def parse_log_line(line: str) -> None:
 
 # ---------- Worker ----------
 def log_tail_worker() -> None:
-    cmd = SSH_BASE + [f"tail -F -n 200 {shlex.quote(LOG_PATH)}"]
+    # Use a large backfill window so early lines like "Total steps = 166" are
+    # still visible when we attach to a long-running training run. 5000 lines
+    # covers several hours of trainer output.
+    cmd = SSH_BASE + [f"tail -F -n 5000 {shlex.quote(LOG_PATH)}"]
     while not STOP.is_set():
         try:
             proc = subprocess.Popen(
