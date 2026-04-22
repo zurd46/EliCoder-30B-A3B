@@ -71,14 +71,38 @@ Ohne FA2 fällt Unsloth auf xformers zurück. Auf H100 mit BF16 bedeutet das **1
 
 **NIEMALS** aus PyPI (`pip install flash-attn`) — das triggert einen 20-min-Source-Build mit nvcc.
 
-**IMMER** prebuilt wheel vom Dao-AILab Release:
+**IMMER** prebuilt wheel vom Dao-AILab Release.
+
+### Wheel-URL-Format (wichtige Fallen)
+
+`flash_attn-{VERSION}+{CUDA}torch{TORCH}cxx11abi{ABI}-cp3{PY}-cp3{PY}-linux_x86_64.whl`
+
+| Feld | Wert bei torch 2.8 + cu128 + Python 3.11 | Anmerkung |
+|---|---|---|
+| VERSION | **2.8.3** (NICHT 2.8.1) | v2.8.1 hat nur torch 2.10 wheels — eine Release-Nummer sagt NICHTS über die torch-Matrix aus. |
+| CUDA | **cu12** (NICHT cu128) | Dao nutzt nur cu11/cu12 als Major, nicht minor. |
+| TORCH | **torch2.8** | Exakte Major.Minor — cu128 Torch braucht torch 2.8, nicht torch 2.7 wheel. |
+| ABI | **TRUE** oder **FALSE** | Prüfen mit: `python -c "import torch; print(torch._C._GLIBCXX_USE_CXX11_ABI)"` — PyPI cu128-Wheels sind `TRUE`, manylinux-Wheels `FALSE`. |
+| PY | **311** | `cp310`/`cp311`/`cp312` etc. |
+
+### Richtige URL dynamisch finden
 
 ```bash
-pip install --no-build-isolation \
-  https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
+curl -s "https://api.github.com/repos/Dao-AILab/flash-attention/releases/tags/v2.8.3" \
+  | python3 -c "
+import json, sys
+for a in json.load(sys.stdin)['assets']:
+    if 'torch2.8' in a['name'] and 'cp311' in a['name'] and 'abiTRUE' in a['name']:
+        print(a['browser_download_url'])"
 ```
 
-Wheel-URL-Format: `cu12{.X} · torch{Y.Z} · cp3{N} · cxx11abi{FALSE/TRUE} · x86_64`.
+Die Wheel-Liste ist **nicht chronologisch** — neue Torch-Versionen landen oft erst in späteren `v2.8.x`-Releases.
+
+### Aktueller Pin (torch 2.8 + cu128 + cp311)
+
+```
+https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+```
 
 ### Verifikation im Unsloth-Log
 
@@ -305,7 +329,41 @@ nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader
 
 ---
 
-## 12. Was beim nächsten Mal anders zu machen wäre
+## 12. Besonders perfide Fallstricke (2026-04-22 Session)
+
+### Bootstrap überschreibt Image-Torch silently
+RunPod-Image `pytorch:2.8.0-py3.11-cuda12.8.1` kommt **mit torch 2.8.0.dev+cu128 vorinstalliert**. Wenn `_bootstrap.py` aber `TORCH_PACKAGES=["torch==2.6.0+cu124"]` hat, wird dieser Image-Zustand **bei jedem Pipeline-Start heruntergestuft auf torch 2.6+cu124**. Ohne Error-Message. Das Resultat: cu128-Pod läuft mit cu124-Stack und verliert den schnellen MoE-Kernel.
+
+**Fix:** `TORCH_PACKAGES` und `TORCH_INDEX_URL` müssen zum Image-CUDA-Level passen. Vor jedem Push prüfen:
+```bash
+# Auf Image: welche CUDA-Runtime hat torch?
+python3 -c "import torch; print(torch.version.cuda)"
+# → 12.8 → TORCH_INDEX_URL muss cu128 sein
+```
+
+### DEPS_MARKER vortäuscht sauberen Stack
+`/workspace/.deps_installed` ist nur ein `touch`-File. Es sagt nur "bootstrap lief mindestens einmal durch" — NICHTS über welche Versionen oder ob der Install erfolgreich war. Bei Wechsel auf neues Pod-Image: **Marker explicit löschen**, sonst wird der falsche Stack weiterverwendet.
+
+```bash
+rm -f /workspace/.deps_installed   # force re-bootstrap
+```
+
+### Paralleler Pipeline-Run auf einem Pod
+Ein `nohup bash pipeline.sh &` während noch ein alter `02_sft.py` läuft → **beide Prozesse teilen sich VRAM** → OOM oder Thrashing. `pgrep/pkill` vor jedem Restart ist kritisch. Immer so:
+```bash
+pkill -9 -f "python.*0[0-9]_\|pipeline.sh" ; sleep 2
+# erst DANACH neuer Start
+```
+
+### Version 2.8.1 ≠ Version 2.8.3 bei flash-attn
+Flash-Attention-Releases sind **fragmentiert nach torch-Kompatibilität**, nicht chronologisch. `v2.8.1` hat nur Wheels für torch 2.10, `v2.8.3` hat die für torch 2.8. Ein neuerer Release-Tag ≠ neuerer torch-Support. **Immer via GitHub-API-Query die passende Version finden**, nicht aus der README.
+
+### `pip install -U` geht ins user-site statt system-site
+Bei `root`-User im RunPod-Container: `pip install -U triton` kann ins `~/.local/lib/python3.11/site-packages/` installieren, NICHT ins System `/usr/local/lib/python3.11/dist-packages/`. Der Python-Import nimmt dann die alte System-Version, nicht die User-Version. Fix: `pip install --force-reinstall --no-deps` oder explizit `--target`.
+
+---
+
+## 13. Was beim nächsten Mal anders zu machen wäre
 
 1. **Immer mit dem neuesten CUDA-Image starten** — nicht mit dem Default-pytorch:2.4-Image. Das spart mehrere $100 pro Training.
 2. **xLAM-Freigabe VOR dem ersten Pod-Start** einholen. Gated-Datasets blockieren die Pipeline sonst in Phase 01.

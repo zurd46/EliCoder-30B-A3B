@@ -1,7 +1,7 @@
 # RunPod-Pipeline — Abhängigkeiten & Versionen
 
 > Stand: 2026-04-22
-> Zielsystem: RunPod H100-NVL Pod mit `runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04`
+> Zielsystem: RunPod H100-NVL Pod mit `runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04`
 
 Der Pipeline-Stack ist **strikt versionsgebunden** — jede Zeile ist aus schmerzhaftem Trial-and-Error. Bitte keine Versionen lockern ohne zu prüfen.
 
@@ -14,40 +14,42 @@ Alle Pflicht-Versionen. Wird von [_bootstrap.py](_bootstrap.py) exakt so install
 ### CUDA-Toolkit (vom Pod-Image)
 | Paket | Version | Quelle |
 |---|---|---|
-| CUDA Runtime | **12.4** | RunPod-Image (`pytorch:2.4.0-…-cuda12.4.1-…`) |
-| Driver | ≥ 550 | Pod-Host |
+| CUDA Runtime | **12.8** | RunPod-Image (`pytorch:2.8.0-…-cuda12.8.1-cudnn-…`) |
+| Driver | ≥ 555 | Pod-Host |
 
-### PyTorch (gepinnt auf CUDA-12.4-Wheels)
+### PyTorch (gepinnt auf CUDA-12.8-Wheels)
 | Paket | Version | Warum diese Version |
 |---|---|---|
-| `torch` | **2.6.0+cu124** | Maximum für `cu124`. `unsloth_zoo ≥ 2026.4.8` braucht `torch.int1`-API (torch ≥ 2.6). |
-| `torchvision` | **0.21.0+cu124** | Passt exakt zu `torch 2.6.0`. |
-| `torchaudio` | **2.6.0+cu124** | Passt exakt zu `torch 2.6.0`. |
+| `torch` | **2.8.0+cu128** | Zieht `triton 3.3+` mit TMA-Support automatisch mit → schneller `unsloth_triton` bzw. `grouped_mm` MoE-Backend. |
+| `torchvision` | **0.23.0+cu128** | Passt exakt zu `torch 2.8.0`. |
+| `torchaudio` | **2.8.0+cu128** | Passt exakt zu `torch 2.8.0`. |
 
 Installiert via:
 ```bash
-pip install --index-url https://download.pytorch.org/whl/cu124 \
-  torch==2.6.0+cu124 torchvision==0.21.0+cu124 torchaudio==2.6.0+cu124
+pip install --index-url https://download.pytorch.org/whl/cu128 \
+  torch==2.8.0+cu128 torchvision==0.23.0+cu128 torchaudio==2.8.0+cu128
 ```
 
 ### Kernel- & Compiler-Stack
 | Paket | Version | Warum diese Version |
 |---|---|---|
-| `triton` | **3.2.0** (explicit pin) | Strict dep von `torch 2.6`. Höhere Versionen brechen `torch._inductor` (in 3.4 wurde `AttrsDescriptor` entfernt). Nachteil: kein `tl.make_tensor_descriptor` → Unsloth MoE-Kernel fällt auf `native_torch` zurück. |
-| `torchao` | **0.13.0** | Passender 4-bit-Quantization-Stack für torch 2.6. |
+| `triton` | **NICHT pinnen** (torch zieht 3.3+) | Torch 2.8 zieht triton 3.3+ mit `tl.make_tensor_descriptor` (TMA). Das ist was Unsloth für den schnellen MoE-Kernel braucht. Ein manueller Pin würde entweder ignoriert oder führt zu Resolver-Konflikten. |
+| `torchao` | **0.13.0** | Passender 4-bit-Quantization-Stack. |
 
 ### Attention
 | Paket | Version | Warum diese Version |
 |---|---|---|
-| `flash-attn` | **2.7.4.post1** | Ohne FA2 fällt Unsloth auf xformers zurück (~1.5–2× langsamer auf H100). FA3 ist für diesen Pfad (BF16 + 30B-MoE + Qwen3) noch nicht stabil. |
+| `flash-attn` | **2.8.3** (mit torch 2.8-Wheel) | Ohne FA2 fällt Unsloth auf xformers zurück (~1.5–2× langsamer auf H100). v2.8.1 hat KEIN torch 2.8-Wheel — v2.8.3 war die erste Version mit passenden Wheels. |
 
 Prebuilt-Wheel (verhindert 20-min-Kompilieren):
 ```bash
 pip install --no-build-isolation \
-  https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
+  https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 ```
 
-Matrix-Schlüssel beim Wheel: `cu12 · torch 2.6 · cp311 · cxx11abiFALSE · x86_64`.
+Matrix-Schlüssel beim Wheel: `cu12 · torch 2.8 · cp311 · cxx11abi**TRUE** · x86_64`.
+
+**Abi-Faustregel:** `torch._C._GLIBCXX_USE_CXX11_ABI` am Pod abfragen — bei cu128-Wheels meistens `True`, bei manylinux-Wheels `False`.
 
 ### Training-Framework
 | Paket | Version | Warum diese Version |

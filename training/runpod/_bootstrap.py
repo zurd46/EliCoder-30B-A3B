@@ -25,12 +25,14 @@ TORCH_PACKAGES = [
 ]
 TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 
-# Flash-Attention-2 Wheel passend zu torch 2.8 + cu128 + cxx11abiTRUE (torch 2.8
-# default). Ohne dieses Wheel triggert `pip install flash-attn` einen 20-min
-# Source-Build mit nvcc — der hier prebuilt ist in <30 s installiert.
+# Flash-Attention-2 Wheel passend zu torch 2.8 + cu12 + cxx11abi=TRUE
+# (torch 2.8+cu128 default bei CUDA-Index-Build). Wheel-Namenskonvention bei
+# Dao-AILab: "cu12" (nicht "cu128"), "torch2.8", "cxx11abiTRUE"/"FALSE"
+# muss zu torch._C._GLIBCXX_USE_CXX11_ABI passen. v2.8.3 hat torch 2.8 wheels;
+# v2.8.1 nicht (nur torch 2.10) — daher v2.8.3.
 FLASH_ATTN_WHEEL = (
     "https://github.com/Dao-AILab/flash-attention/releases/download/"
-    "v2.8.1/flash_attn-2.8.1+cu128torch2.8cxx11abiTRUE-"
+    "v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-"
     "cp311-cp311-linux_x86_64.whl"
 )
 
