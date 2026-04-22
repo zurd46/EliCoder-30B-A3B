@@ -26,7 +26,7 @@ training:
   weight_decay: 0.01
   optim: adamw_8bit
   bf16: true
-  gradient_checkpointing: false
+  gradient_checkpointing: true
   logging_steps: 20
   save_strategy: steps
   save_steps: 20
