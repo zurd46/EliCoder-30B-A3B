@@ -307,6 +307,20 @@ def parse_log_line(line: str) -> None:
     if m := EVAL_RUNTIME_RE.search(line):
         TRAIN.last_eval_runtime = float(m.group(1))
 
+    # Agent-eval metrics — emitted by AgentEvalCallback after each evaluate().
+    if "[agent-eval]" in line:
+        if m := AGENT_STEP_RE.search(line):
+            TRAIN.last_agent_step = int(m.group(1))
+        if m := AGENT_PARSE_RE.search(line):
+            TRAIN.last_agent_parse_rate = float(m.group(1))
+        if m := AGENT_NAME_RE.search(line):
+            TRAIN.last_agent_name_match = float(m.group(1))
+        if m := AGENT_TOKENS_RE.search(line):
+            val = float(m.group(1))
+            TRAIN.last_agent_avg_tokens = val
+            if TRAIN.first_agent_avg_tokens is None:
+                TRAIN.first_agent_avg_tokens = val
+
     # Checkpoint save detection — trainer logs "Saving model checkpoint to .../checkpoint-N".
     if "Saving" in line and "checkpoint" in line.lower():
         if m := SAVE_STEP_RE.search(line):
@@ -519,6 +533,35 @@ def metrics_panel() -> Panel:
             t.add_row("Eval time", f"{TRAIN.last_eval_runtime:.1f}s")
     else:
         t.add_row("Eval", "[dim]starts at step 20[/dim]" if is_training_phase else "[dim]—[/dim]")
+
+    # ── Agent-Eval (Tool-Call-Qualität + Mac-Speed-Proxy) ─────────────────
+    has_agent = (
+        TRAIN.last_agent_parse_rate is not None
+        or TRAIN.last_agent_name_match is not None
+        or TRAIN.last_agent_avg_tokens is not None
+    )
+    if has_agent:
+        t.add_row("", "")  # Separator vor Agent-Block
+        step_suffix = f" (step {TRAIN.last_agent_step})" if TRAIN.last_agent_step else ""
+        if TRAIN.last_agent_parse_rate is not None:
+            pct = TRAIN.last_agent_parse_rate * 100
+            color = "green" if pct >= 90 else "yellow" if pct >= 70 else "red"
+            t.add_row("Agent parse", f"[{color}]{pct:5.1f}%[/{color}]{step_suffix}")
+        if TRAIN.last_agent_name_match is not None:
+            pct = TRAIN.last_agent_name_match * 100
+            color = "green" if pct >= 85 else "yellow" if pct >= 60 else "red"
+            t.add_row("Tool-name match", f"[{color}]{pct:5.1f}%[/{color}]")
+        if TRAIN.last_agent_avg_tokens is not None:
+            trend = ""
+            if (TRAIN.first_agent_avg_tokens is not None
+                    and TRAIN.first_agent_avg_tokens != TRAIN.last_agent_avg_tokens):
+                delta = TRAIN.last_agent_avg_tokens - TRAIN.first_agent_avg_tokens
+                # Weniger Tokens = schneller auf Mac → ↓ ist grün.
+                arrow = "↓" if delta < 0 else "↑"
+                color = "green" if delta < 0 else "red"
+                trend = f" [{color}]{arrow}{abs(delta):.1f}[/{color}]"
+            t.add_row("Out-tokens/call", f"{TRAIN.last_agent_avg_tokens:.1f}{trend}")
+
     if TRAIN.wandb_url:
         short = TRAIN.wandb_url.split("/runs/", 1)[-1][:24]
         t.add_row("WandB", f"[link={TRAIN.wandb_url}]…/runs/{short}[/link]")
@@ -674,7 +717,7 @@ def build_view() -> Layout:
     # rows so they can't collapse to 0 when the log panel is large.
     root = Layout()
     root.split_column(
-        Layout(name="top", size=10),   # header + metrics + GPU
+        Layout(name="top", size=14),   # header + metrics (incl. agent-eval) + GPU
         Layout(name="mid", size=7),    # sparklines + cost + checkpoints
         Layout(name="log"),            # log tail takes the remaining height
     )
