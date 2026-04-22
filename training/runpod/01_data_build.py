@@ -1,13 +1,12 @@
 """
 01 · Dataset-Build (RunPod-Version) — CPU-Phase, ~25 min.
 
-SFT-Quellen (Priorität: einzigartig + verifiziert):
-  - nvidia/Nemotron-SFT-OpenCode-v1        (15k)
-  - nvidia/OpenCodeReasoning-2             (30k) — Chain-of-Thought Python
-  - m-a-p/CodeFeedback-Filtered-Instruction (30k) — execution-verified, 2024
-  - bigcode/self-oss-instruct-sc2-exec-filter-50k (25k) — OSS-inspired + verified
-  - ise-uiuc/Magicoder-Evol-Instruct-110K  (20k)
-  - princeton-nlp/SWE-bench_Verified        (500) — real repo patches
+SFT-Quellen — reiner Agentik-Fokus (~115k Samples, nur Tool-Call-Signal):
+  - Salesforce/xlam-function-calling-60k    (60k) — BFCL-Style single-turn Tool-Calls
+  - glaiveai/glaive-function-calling-v2     (25k) — Diverse Tool-Schemas + Dialog-Kontext
+  - Team-ACE/ToolACE                        (15k) — Multi-turn Agent-Loops
+  - NousResearch/hermes-function-calling-v1 (15k) — OpenAI-kompatible Function-Calls
+  - princeton-nlp/SWE-bench_Verified         (500) — real repo patches (Struktur)
 
 DPO-Quellen:
   - Vezora/Code-Preference-Pairs           (50k) — buggy vs. fixed
@@ -33,12 +32,11 @@ TOK = os.environ["HF_TOKEN"]
 random.seed(42)
 
 MAX_PER_SOURCE = {
-    "nemotron_opencode":   15_000,
-    "opencodereasoning":   30_000,
-    "codefeedback":        30_000,
-    "self_oss_instruct":   35_000,
-    "magicoder_evol":      20_000,
-    "swe_verified":           500,
+    "xlam_tool_calls":     60_000,  # BFCL-Style single-turn Function-Calls (max)
+    "glaive_fc_v2":        25_000,  # Diverse Tool-Schemas + Dialog-Kontext
+    "toolace":             15_000,  # Multi-turn Agent-Loops
+    "hermes_fc":           15_000,  # OpenAI-kompatible Function-Calls
+    "swe_verified":           500,  # Real repo patches (Struktur)
 }
 
 
@@ -46,70 +44,138 @@ def to_chatml(messages):
     return {"messages": messages}
 
 
-def load_nemotron_opencode(n: int):
-    ds = load_dataset("nvidia/Nemotron-SFT-OpenCode-v1", split="general", token=TOK).shuffle(seed=42)
+def load_xlam_tool_calls(n: int):
+    """BFCL-Style Function-Calling Traces — Kern für Agent-Tool-Use.
+
+    xLAM-60k Schema: {query, tools (JSON-list), answers (JSON-list von tool_calls)}.
+    Wir formatieren als Qwen-ChatML: system mit Tool-Schema, user-Query,
+    assistant antwortet DIREKT mit <tool_call>-Block (keine Preamble → weniger
+    Output-Tokens pro Call → schnellere Agent-Loops auf M-Series Macs).
+    """
+    import json as _json
+    ds = load_dataset("Salesforce/xlam-function-calling-60k", split="train", token=TOK).shuffle(seed=42)
     out = []
     for row in ds.select(range(min(n, len(ds)))):
-        msgs = row.get("messages") or row.get("conversation")
-        if msgs:
-            out.append(to_chatml(msgs))
-    return Dataset.from_list(out)
-
-
-def load_open_code_reasoning(n: int):
-    ds = load_dataset("nvidia/OpenCodeReasoning-2", split="train", token=TOK).shuffle(seed=42)
-    out = []
-    sys_ = "You are a senior engineer. Think step by step, then write the final solution."
-    for row in ds.select(range(min(n, len(ds)))):
-        q = row.get("question") or row.get("input")
-        a = row.get("r1_generation") or row.get("solution") or row.get("output")
-        if q and a:
-            out.append(to_chatml([
-                {"role": "system", "content": sys_},
-                {"role": "user", "content": q},
-                {"role": "assistant", "content": a},
-            ]))
-    return Dataset.from_list(out)
-
-
-def load_codefeedback(n: int):
-    """Execution-verified code instructions — 2024, unlikely in Qwen pretraining."""
-    ds = load_dataset("m-a-p/CodeFeedback-Filtered-Instruction", split="train", token=TOK).shuffle(seed=42)
-    out = []
-    for row in ds.select(range(min(n, len(ds)))):
-        q = row.get("query") or ""
-        a = row.get("answer") or ""
-        if q and a:
-            out.append(to_chatml([
-                {"role": "user", "content": q},
-                {"role": "assistant", "content": a},
-            ]))
-    return Dataset.from_list(out)
-
-
-def load_self_oss_instruct(n: int):
-    """OSS-inspired instructions with execution verification."""
-    ds = load_dataset("bigcode/self-oss-instruct-sc2-exec-filter-50k", split="train", token=TOK).shuffle(seed=42)
-    out = []
-    for row in ds.select(range(min(n, len(ds)))):
-        inst = row.get("instruction") or ""
-        resp = row.get("response") or ""
-        if inst and resp:
-            out.append(to_chatml([
-                {"role": "user", "content": inst},
-                {"role": "assistant", "content": resp},
-            ]))
-    return Dataset.from_list(out)
-
-
-def load_magicoder_evol(n: int):
-    ds = load_dataset("ise-uiuc/Magicoder-Evol-Instruct-110K", split="train", token=TOK).shuffle(seed=42)
-    out = []
-    for row in ds.select(range(min(n, len(ds)))):
+        query = row.get("query") or ""
+        tools_raw = row.get("tools") or "[]"
+        answers_raw = row.get("answers") or "[]"
+        if not (query and tools_raw and answers_raw):
+            continue
+        try:
+            tools = _json.loads(tools_raw) if isinstance(tools_raw, str) else tools_raw
+            calls = _json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
+        except Exception:
+            continue
+        if not calls:
+            continue
+        # Qwen-Format: <tools>…</tools> im System, <tool_call>…</tool_call> im Assistant.
+        sys_ = (
+            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
+            "<tools>\n" + _json.dumps(tools, ensure_ascii=False) + "\n</tools>"
+        )
+        # Ein <tool_call>-Block pro Aufruf; mehrere Calls → mehrere Blöcke hintereinander.
+        tc_blocks = "\n".join(
+            f"<tool_call>\n{_json.dumps(c, ensure_ascii=False)}\n</tool_call>" for c in calls
+        )
         out.append(to_chatml([
-            {"role": "user", "content": row["instruction"]},
-            {"role": "assistant", "content": row["response"]},
+            {"role": "system", "content": sys_},
+            {"role": "user", "content": query},
+            {"role": "assistant", "content": tc_blocks},
         ]))
+    return Dataset.from_list(out)
+
+
+def load_glaive_fc_v2(n: int):
+    """Glaive Function-Calling v2 — diverse Tool-Schemas + Dialog-Kontext.
+
+    Schema: `system` (mit Tool-Schema) + `chat` (String mit USER:/ASSISTANT:/FUNCTION RESPONSE:-Markern).
+    Wir parsen den Chat-String in ChatML-Messages um.
+    """
+    import re as _re
+    ds = load_dataset("glaiveai/glaive-function-calling-v2", split="train", token=TOK).shuffle(seed=42)
+    out = []
+    # Glaive nutzt diese Rollen-Marker im chat-String.
+    pattern = _re.compile(r"(USER|ASSISTANT|FUNCTION RESPONSE):\s*", _re.IGNORECASE)
+    role_map = {"user": "user", "assistant": "assistant", "function response": "tool"}
+    for row in ds.select(range(min(n, len(ds)))):
+        sys_ = (row.get("system") or "").strip()
+        chat = (row.get("chat") or "").strip()
+        if not chat:
+            continue
+        parts_ = pattern.split(chat)
+        # parts_ = ["", "USER", "...", "ASSISTANT", "...", ...]
+        messages = []
+        if sys_:
+            messages.append({"role": "system", "content": sys_})
+        for i in range(1, len(parts_) - 1, 2):
+            role = role_map.get(parts_[i].strip().lower())
+            content = parts_[i + 1].strip().rstrip("<|endoftext|>").strip()
+            if role and content:
+                messages.append({"role": role, "content": content})
+        if len(messages) >= 2:
+            out.append(to_chatml(messages))
+    return Dataset.from_list(out)
+
+
+def load_toolace(n: int):
+    """Multi-turn Agent-Dialoge — echte Tool-Loops (Call → Result → Follow-up).
+
+    ToolACE hat Konversationen mit mehreren Tool-Calls hintereinander,
+    genau das Muster das der Agent auf dem Mac lernen muss.
+    """
+    import json as _json
+    ds = load_dataset("Team-ACE/ToolACE", split="train", token=TOK).shuffle(seed=42)
+    out = []
+    for row in ds.select(range(min(n, len(ds)))):
+        convs = row.get("conversations") or row.get("messages")
+        tools = row.get("system") or row.get("tools") or ""
+        if not convs:
+            continue
+        # ToolACE-Rollen normalisieren → ChatML
+        messages = []
+        if tools:
+            tools_str = tools if isinstance(tools, str) else _json.dumps(tools, ensure_ascii=False)
+            messages.append({"role": "system", "content": tools_str})
+        role_map = {"user": "user", "human": "user",
+                    "assistant": "assistant", "gpt": "assistant",
+                    "tool": "tool", "function": "tool",
+                    "system": "system"}
+        for turn in convs:
+            role = role_map.get(turn.get("from") or turn.get("role") or "", "user")
+            content = turn.get("value") or turn.get("content") or ""
+            if content:
+                messages.append({"role": role, "content": content})
+        if len(messages) >= 2:
+            out.append(to_chatml(messages))
+    return Dataset.from_list(out)
+
+
+def load_hermes_fc(n: int):
+    """OpenAI-kompatible Function-Call-Traces — Nous Research.
+
+    Hermes-FC nutzt das Standard-`tools`-Schema und `tool_calls`-Antwortformat.
+    Wir übernehmen die messages direkt (sie sind bereits ChatML-strukturiert).
+    """
+    import json as _json
+    # func_calling_singleturn ist der kleinere, verifizierte Split.
+    ds = load_dataset("NousResearch/hermes-function-calling-v1",
+                      "func_calling_singleturn", split="train", token=TOK).shuffle(seed=42)
+    out = []
+    for row in ds.select(range(min(n, len(ds)))):
+        msgs = row.get("conversations") or row.get("messages")
+        if not msgs:
+            continue
+        role_map = {"system": "system", "human": "user", "user": "user",
+                    "gpt": "assistant", "assistant": "assistant",
+                    "tool": "tool", "function": "tool"}
+        normalized = []
+        for turn in msgs:
+            role = role_map.get(turn.get("from") or turn.get("role") or "", "user")
+            content = turn.get("value") or turn.get("content") or ""
+            if content:
+                normalized.append({"role": role, "content": content})
+        if len(normalized) >= 2:
+            out.append(to_chatml(normalized))
     return Dataset.from_list(out)
 
 
@@ -131,16 +197,13 @@ def load_swe_verified(n: int):
     return Dataset.from_list(out)
 
 
-print("loading SFT sources …")
+print("loading SFT sources (Agentik-Fokus) …")
 loaders = [
-    (load_nemotron_opencode,   "nemotron_opencode"),
-    (load_open_code_reasoning, "opencodereasoning"),
-    (load_codefeedback,        "codefeedback"),
-    (load_self_oss_instruct,   "self_oss_instruct"),
-
-    (load_magicoder_evol,      "magicoder_evol"),
-    (load_swe_verified,        "swe_verified"),
-
+    (load_xlam_tool_calls, "xlam_tool_calls"),
+    (load_glaive_fc_v2,    "glaive_fc_v2"),
+    (load_toolace,         "toolace"),
+    (load_hermes_fc,       "hermes_fc"),
+    (load_swe_verified,    "swe_verified"),
 ]
 
 from concurrent.futures import ThreadPoolExecutor

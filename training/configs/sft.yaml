@@ -5,18 +5,26 @@ lora:
   r: 64
   alpha: 128
   dropout: 0.0
+  # Agentik: MoE-Router + Expert-Projektionen müssen adaptierbar sein,
+  # sonst lernt das Modell keine neuen Tool-Routing-Entscheidungen.
   target_modules:
     - q_proj
     - k_proj
     - v_proj
     - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
   use_rslora: true
   finetune_all_experts: false
 
 training:
   dataset: zurd46/EliCoder-Dataset-SFT
   split: train
-  max_seq_length: 2048
+  # 4096 ist das Minimum, damit realistische Tool-Call-Traces
+  # (System + Tool-Schema + mehrere Tool-Calls + Results) reinpassen.
+  # Unter 4k trainiert man nur Short-Coding, keine Agentik.
+  max_seq_length: 4096
   num_train_epochs: 2
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 64

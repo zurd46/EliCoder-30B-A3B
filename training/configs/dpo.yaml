@@ -25,7 +25,6 @@ training:
   eval_strategy: steps
   eval_steps: 200
   per_device_eval_batch_size: 1
-  save_total_limit: 2
 
 output:
   hf_repo: zurd46/EliCoder-30B-A3B-LoRA-DPO
