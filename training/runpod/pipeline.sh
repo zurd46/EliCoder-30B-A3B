@@ -67,6 +67,7 @@ run_phase 02 "SFT"             runpod/02_sft.py
 run_phase 03 "DPO"             runpod/03_dpo.py
 run_phase 04 "LongCtx"         runpod/04_longctx.py
 run_phase 05 "Export"          runpod/05_export.py
+run_phase 06 "BFCL-lite Eval"  runpod/06_bfcl_eval.py
 
 echo ""
 echo "========================================"
