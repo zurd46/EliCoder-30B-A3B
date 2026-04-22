@@ -40,6 +40,31 @@ MAX_PER_SOURCE = {
     "swe_verified":           500,  # Real repo patches (Struktur)
 }
 
+# Agent-System-Prompt: identisch in SFT/DPO/LongCtx und in beiden Eval-Loops.
+# Die "End immediately"-Klausel + kompakte-JSON-Anweisung senkt avg_output_tokens
+# auf dem Mac messbar (Decode ist der Bottleneck).
+AGENT_SYS = (
+    "You are a function-calling agent. Respond with tool calls only, no prose.\n"
+    "Emit one <tool_call>…</tool_call> block per call, JSON on a single line, "
+    "compact (no spaces). End immediately after the last </tool_call>."
+)
+
+
+def _compact_json(obj) -> str:
+    """JSON ohne Whitespace — spart pro Key/Value-Paar ~1 Token beim Decode."""
+    import json as _j
+    return _j.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def _tc_block(call) -> str:
+    """Ein <tool_call>-Block ohne innere Newlines — spart 2 Tokens pro Call."""
+    return f"<tool_call>{_compact_json(call)}</tool_call>"
+
+
+def _tc_blocks(calls) -> str:
+    """Mehrere Calls hintereinander, 1 Newline als Trenner (nicht innen)."""
+    return "\n".join(_tc_block(c) for c in calls)
+
 
 def to_chatml(messages):
     return {"messages": messages}
@@ -70,18 +95,11 @@ def load_xlam_tool_calls(n: int):
         if not calls:
             continue
         # Qwen-Format: <tools>…</tools> im System, <tool_call>…</tool_call> im Assistant.
-        sys_ = (
-            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
-            "<tools>\n" + _json.dumps(tools, ensure_ascii=False) + "\n</tools>"
-        )
-        # Ein <tool_call>-Block pro Aufruf; mehrere Calls → mehrere Blöcke hintereinander.
-        tc_blocks = "\n".join(
-            f"<tool_call>\n{_json.dumps(c, ensure_ascii=False)}\n</tool_call>" for c in calls
-        )
+        sys_ = AGENT_SYS + "\n<tools>\n" + _compact_json(tools) + "\n</tools>"
         out.append(to_chatml([
             {"role": "system", "content": sys_},
             {"role": "user", "content": query},
-            {"role": "assistant", "content": tc_blocks},
+            {"role": "assistant", "content": _tc_blocks(calls)},
         ]))
     return Dataset.from_list(out)
 
@@ -247,22 +265,47 @@ VERBOSE_PREAMBLES = [
     "Here is my plan:\n\n",
 ]
 
+VERBOSE_POSTAMBLES = [
+    "\n\nI've made the tool call with the parameters extracted from your request. Let me know if you need anything else!",
+    "\n\nThe function call above should retrieve the information you asked for. Please check the result.",
+    "\n\nI've carefully mapped your request to the available tool and filled in the arguments accordingly.",
+    "\n\nHope this tool call matches what you were looking for. Happy to adjust the parameters if needed.",
+]
 
-def build_agent_dpo(n: int):
+
+def _pretty_tc_blocks(calls) -> str:
+    """Pretty-printed Variante mit Newlines + indent=2 — explizit länger als die
+    kompakte Form, damit DPO die Length-Gradient sauber lernt."""
+    import json as _j
+    return "\n".join(
+        f"<tool_call>\n{_j.dumps(c, ensure_ascii=False, indent=2)}\n</tool_call>"
+        for c in calls
+    )
+
+
+def build_agent_dpo(n: int, min_length_gap: float = 1.5):
     """Synthetic Agent-DPO aus xLAM — Concise-vs-Verbose Tool-Calls.
 
     Prompt: Tool-Schema-Kontext + User-Query
-    chosen: direkter <tool_call>-Block (keine Prosa)
-    rejected: geschwätziger Preamble + exakt derselbe Tool-Call
+    chosen: kompakter <tool_call>-Block (single-line JSON, keine Prosa)
+    rejected: eine von drei Verbosity-Sünden (rotierend):
+      a) Preamble-Prosa + Call
+      b) Pretty-printed/multi-line JSON im Call
+      c) Call + trailing Explanation
 
-    Damit lernt DPO *nur* den Unterschied zwischen kurz und geschwätzig —
-    Korrektheit des Tool-Calls bleibt konstant. Der Conciseness-Effekt
-    wird isoliert trainiert.
+    Damit bekommt DPO drei unabhängige Längen-Signale statt nur Anti-Preamble.
+    Pairs mit zu geringer Längen-Differenz werden gefiltert — sonst ist das
+    Gradient-Signal verwässert.
     """
     import json as _json
     ds = load_dataset("Salesforce/xlam-function-calling-60k", split="train", token=TOK).shuffle(seed=42)
     out = []
-    for row in ds.select(range(min(n, len(ds)))):
+    dropped_short = 0
+    # Oversample 2× weil Length-Filter ein paar Pairs wegwirft.
+    pool = ds.select(range(min(n * 2, len(ds))))
+    for row in pool:
+        if len(out) >= n:
+            break
         query = row.get("query") or ""
         tools_raw = row.get("tools") or "[]"
         answers_raw = row.get("answers") or "[]"
@@ -276,22 +319,29 @@ def build_agent_dpo(n: int):
         if not calls:
             continue
 
-        tc_blocks = "\n".join(
-            f"<tool_call>\n{_json.dumps(c, ensure_ascii=False)}\n</tool_call>" for c in calls
-        )
-        preamble = random.choice(VERBOSE_PREAMBLES)
+        chosen = _tc_blocks(calls)  # kompakt, single-line
+        variant = random.choice(("preamble", "pretty", "postamble"))
+        if variant == "preamble":
+            rejected = random.choice(VERBOSE_PREAMBLES) + chosen
+        elif variant == "pretty":
+            rejected = _pretty_tc_blocks(calls)
+        else:
+            rejected = chosen + random.choice(VERBOSE_POSTAMBLES)
+
+        # Length-Gap-Filter: rejected muss merklich länger sein als chosen,
+        # sonst ist das DPO-Update in Richtung "kürzer" zu schwach.
+        if len(rejected) < min_length_gap * len(chosen):
+            dropped_short += 1
+            continue
 
         prompt = (
-            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
-            "<tools>\n" + _json.dumps(tools, ensure_ascii=False) + "\n</tools>\n\n"
+            AGENT_SYS + "\n"
+            "<tools>\n" + _compact_json(tools) + "\n</tools>\n\n"
             f"User: {query}\nAssistant:"
         )
 
-        out.append({
-            "prompt":   prompt,
-            "chosen":   tc_blocks,
-            "rejected": preamble + tc_blocks,
-        })
+        out.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
+    print(f"  dpo: {len(out)} pairs kept, {dropped_short} dropped by length-gap filter")
     return Dataset.from_list(out)
 
 
@@ -382,18 +432,15 @@ def synth_long_ctx_agentic(n: int, lengths=(16_000, 32_000, 64_000, 128_000)):
             else:
                 args[pname] = f"value_{random.randint(1, 999)}"
 
-        tools_json = _json.dumps(haystack, ensure_ascii=False)
-        sys_msg = (
-            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
-            f"<tools>\n{tools_json}\n</tools>"
-        )
+        tools_json = _compact_json(haystack)
+        sys_msg = AGENT_SYS + f"\n<tools>\n{tools_json}\n</tools>"
         user_msg = (
             f"Call the `{needle_name}` function"
-            + (f" with these arguments: {_json.dumps(args, ensure_ascii=False)}." if args
+            + (f" with these arguments: {_compact_json(args)}." if args
                else " (no arguments required).")
         )
         tool_call = {"name": needle_name, "arguments": args}
-        assistant_msg = f"<tool_call>\n{_json.dumps(tool_call, ensure_ascii=False)}\n</tool_call>"
+        assistant_msg = _tc_block(tool_call)
 
         out.append(to_chatml([
             {"role": "system", "content": sys_msg},
