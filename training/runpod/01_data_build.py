@@ -61,7 +61,7 @@ def load_nemotron_opencode(n: int):
 
 
 def load_open_code_reasoning(n: int):
-    ds = load_dataset("nvidia/OpenCodeReasoning-2", "python", split="train", token=TOK).shuffle(seed=42)
+    ds = load_dataset("nvidia/OpenCodeReasoning-2", split="train", token=TOK).shuffle(seed=42)
     out = []
     sys_ = "You are a senior engineer. Think step by step, then write the final solution."
     for row in ds.select(range(min(n, len(ds)))):
@@ -108,7 +108,7 @@ def load_self_oss_instruct(n: int):
 
 def load_commitpackft(n: int):
     """Real GitHub commits — highly unique, teaches code patching."""
-    ds = load_dataset("bigcode/commitpackft", "python", split="train", token=TOK).shuffle(seed=42)
+    ds = load_dataset("bigcode/commitpackft", "python", split="train", token=TOK, trust_remote_code=True).shuffle(seed=42)
     out = []
     for row in ds.select(range(min(n, len(ds)))):
         old = row.get("old_contents") or ""
