@@ -692,34 +692,13 @@ def checkpoint_panel() -> Panel:
             t.add_row("HF cache", f"{DISK.hf_cache_gb:.1f} GB")
     return Panel(t, title="[bold]Checkpoints & disk[/bold]", border_style="cyan")
 
-def log_panel() -> Panel:
-    if not TRAIN.log_tail:
-        body = Text("waiting for log lines…", style="dim")
-    else:
-        lines = list(TRAIN.log_tail)[-16:]
-        body = Text()
-        for ln in lines:
-            style = "white"
-            low = ln.lower()
-            if "error" in low or "traceback" in low or "oom" in low:
-                style = "bold red"
-            elif "warn" in low:
-                style = "yellow"
-            elif "loss" in low and "grad_norm" in low:
-                style = "bold green"
-            elif "/" in ln and "it/s" in ln or "s/it" in ln:
-                style = "cyan"
-            body.append(ln[-240:] + "\n", style=style)
-    return Panel(body, title=f"[bold]{LOG_PATH} (recent lines)[/bold]", border_style="white")
-
 def build_view() -> Layout:
-    # One root Layout with three stacked rows. Using size= for the two metric
-    # rows so they can't collapse to 0 when the log panel is large.
+    # Log-Tail wurde entfernt — das Layout hat nur noch top (Metriken) + mid
+    # (Sparklines + Cost + Checkpoints). Beide Zeilen teilen sich den Platz.
     root = Layout()
     root.split_column(
         Layout(name="top", size=14),   # header + metrics (incl. agent-eval) + GPU
-        Layout(name="mid", size=7),    # sparklines + cost + checkpoints
-        Layout(name="log"),            # log tail takes the remaining height
+        Layout(name="mid"),            # sparklines + cost + checkpoints — Rest
     )
     root["top"].split_row(
         Layout(header_panel(), name="h", ratio=2),
@@ -731,7 +710,6 @@ def build_view() -> Layout:
         Layout(cost_panel(), name="cost", ratio=1),
         Layout(checkpoint_panel(), name="ckpt", ratio=2),
     )
-    root["log"].update(log_panel())
     return root
 
 # ---------- Main ----------
