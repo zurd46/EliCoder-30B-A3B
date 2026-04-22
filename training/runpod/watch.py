@@ -20,6 +20,7 @@ Quit with Ctrl+C — training on the pod keeps running (nohup).
 """
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shlex
@@ -60,8 +61,6 @@ CKPT_DIR = os.environ.get("POD_CKPT", "/workspace/checkpoints/sft-phase-a")
 WORKSPACE_PATH = os.environ.get("POD_WORKSPACE", "/workspace")
 GPU_POLL_SEC = float(os.environ.get("GPU_POLL_SEC", "2"))
 DISK_POLL_SEC = float(os.environ.get("DISK_POLL_SEC", "30"))
-# Pod hourly rate for the cost tracker (fallback $2.59 for H100 NVL reserved).
-HOURLY_RATE = float(os.environ.get("POD_HOURLY_RATE", "2.59"))
 SAVE_STEPS = int(os.environ.get("POD_SAVE_STEPS", "20"))  # used to predict next save
 # Tokens/s calculation: effective batch * max_seq_length ≈ tokens seen per step.
 # SFT default: grad_accum 64 * bsz 1 * max_seq_length 6144 = 393,216.
@@ -69,27 +68,73 @@ EFFECTIVE_BATCH_TOKENS = int(os.environ.get("POD_TOKENS_PER_STEP", str(64 * 6144
 
 _PORT_RE = re.compile(r"(\d+\.\d+\.\d+\.\d+):(\d+)->22\s*\(pub,tcp\)")
 
+
+@functools.lru_cache(maxsize=1)
+def _runpodctl_pod_info() -> Optional[str]:
+    """Cached `runpodctl get pod <id> -a` output — None if the call failed."""
+    try:
+        return subprocess.check_output(
+            ["runpodctl", "get", "pod", POD_ID, "-a"],
+            stderr=subprocess.STDOUT, timeout=15, text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+
+
 def detect_ssh_endpoint() -> tuple[str, str]:
     """Return (host, port) for SSH — env overrides win, otherwise ask runpodctl."""
     host = os.environ.get("POD_HOST")
     port = os.environ.get("POD_PORT")
     if host and port:
         return host, port
-    try:
-        out = subprocess.check_output(
-            ["runpodctl", "get", "pod", POD_ID, "-a"],
-            stderr=subprocess.STDOUT, timeout=15, text=True,
-        )
+    out = _runpodctl_pod_info()
+    if out is None:
+        # Reproduce the original error flow for the SSH path, where we must fail loudly.
+        try:
+            subprocess.check_output(
+                ["runpodctl", "get", "pod", POD_ID, "-a"],
+                stderr=subprocess.STDOUT, timeout=15, text=True,
+            )
+        except FileNotFoundError:
+            sys.exit("runpodctl not installed — install it or set POD_HOST/POD_PORT env vars")
+        except subprocess.CalledProcessError as e:
+            sys.exit(f"runpodctl error: {(e.output or '').strip()[:200]}")
+        except subprocess.TimeoutExpired:
+            sys.exit("runpodctl get pod → timeout (>15s)")
+    else:
         m = _PORT_RE.search(out)
         if m:
             return m.group(1), m.group(2)
-    except FileNotFoundError:
-        sys.exit("runpodctl not installed — install it or set POD_HOST/POD_PORT env vars")
-    except subprocess.CalledProcessError as e:
-        sys.exit(f"runpodctl error: {(e.output or '').strip()[:200]}")
-    except subprocess.TimeoutExpired:
-        sys.exit("runpodctl get pod → timeout (>15s)")
     sys.exit(f"could not find pub-tcp SSH port for {POD_ID} in runpodctl output")
+
+
+def _detect_hourly_rate() -> Optional[float]:
+    """Parse the `$/HR` column from `runpodctl get pod -a` — None if unavailable."""
+    out = _runpodctl_pod_info()
+    if not out:
+        return None
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return None
+    headers = [h.strip() for h in lines[0].split("\t")]
+    values = [v.strip() for v in lines[1].split("\t")]
+    if "$/HR" not in headers:
+        return None
+    idx = headers.index("$/HR")
+    if idx >= len(values):
+        return None
+    try:
+        return float(values[idx])
+    except ValueError:
+        return None
+
+
+# Pod hourly rate: env var wins, else ask runpodctl, else fall back to $2.59 (H100 NVL reserved).
+_env_rate = os.environ.get("POD_HOURLY_RATE")
+if _env_rate:
+    HOURLY_RATE = float(_env_rate)
+else:
+    HOURLY_RATE = _detect_hourly_rate() or 2.59
 
 if POD_PROXY_USER:
     # RunPod proxy: <pod-id>-<account-id>@ssh.runpod.io, no -p, PTY required.
