@@ -3,8 +3,8 @@ adapter_repo: zurd46/EliCoder-30B-A3B-LoRA-DPO
 
 rope:
   rope_scaling_type: yarn
-  rope_scaling_factor: 4.0
-  original_max_position_embeddings: 65536
+  rope_scaling_factor: 1.0
+  original_max_position_embeddings: 262144
   target_max_position_embeddings: 262144
 
 layer_freeze:

@@ -180,14 +180,23 @@ loaders = [
     (load_agentic_cot,         "agentic_cot"),
 ]
 
-parts = []
-for fn, key in loaders:
+from concurrent.futures import ThreadPoolExecutor
+
+def _load_worker(fn_key):
+    fn, key = fn_key
     try:
         d = fn(MAX_PER_SOURCE[key])
         print(f"  {key}: {len(d)}")
-        parts.append(d)
+        return d
     except Exception as e:
         print(f"  {key}: SKIPPED ({e})")
+        return None
+
+parts = []
+with ThreadPoolExecutor(max_workers=4) as ex:
+    results = list(ex.map(_load_worker, loaders))
+
+parts = [r for r in results if r is not None]
 
 sft = concatenate_datasets(parts).shuffle(seed=42)
 print(f"\nSFT total: {len(sft)} samples")

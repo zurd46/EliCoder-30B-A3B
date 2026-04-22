@@ -37,12 +37,14 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=CFG["base_model"],
     max_seq_length=CFG["training"]["max_seq_length"],
     load_in_4bit=True,
+    dtype=torch.bfloat16,
     device_map={"": 0},
     token=TOK,
 )
 model = PeftModel.from_pretrained(model, CFG["adapter_repo"], is_trainable=True, token=TOK)
 
 ds = load_dataset(CFG["training"]["dataset"], split=CFG["training"]["split"], token=TOK)
+
 
 T = CFG["training"]
 eval_frac = float(T.get("eval_fraction", 0) or 0)
@@ -73,10 +75,12 @@ args = DPOConfig(
     eval_strategy=T.get("eval_strategy", "no") if eval_ds is not None else "no",
     eval_steps=T.get("eval_steps", 200),
     per_device_eval_batch_size=T.get("per_device_eval_batch_size", 1),
+    dataloader_num_workers=2,
+    dataloader_pin_memory=True,
     report_to="wandb" if os.environ.get("WANDB_API_KEY") else "none",
     push_to_hub=True,
     hub_model_id=CFG["output"]["hf_repo"],
-    hub_strategy="checkpoint",
+    hub_strategy="end",
     hub_token=TOK,
     hub_private_repo=True,
 )

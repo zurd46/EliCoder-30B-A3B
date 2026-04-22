@@ -37,6 +37,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=CFG["training"]["max_seq_length"],
     device_map={"": 0},
     load_in_4bit=True,
+    dtype=torch.bfloat16,
     rope_scaling={
         "type": CFG["rope"]["rope_scaling_type"],
         "factor": CFG["rope"]["rope_scaling_factor"],
@@ -66,10 +67,15 @@ print(f"trainable params: {trainable/1e6:.1f} M")
 
 ds = load_dataset(CFG["training"]["dataset"], split=CFG["training"]["split"], token=TOK)
 
+# Dataset tokenization caching
+import hashlib
+cache_key = hashlib.md5(f"{CFG['training']['dataset']}_{CFG['training']['max_seq_length']}_{tokenizer.name_or_path}".encode()).hexdigest()
+cache_file = f"/workspace/cache/longctx_{cache_key}.arrow"
+
 def fmt(example):
     return {"text": tokenizer.apply_chat_template(example["messages"], tokenize=False)}
 
-ds = ds.map(fmt, remove_columns=ds.column_names)
+ds = ds.map(fmt, remove_columns=ds.column_names, cache_file_name=cache_file)
 
 T = CFG["training"]
 eval_frac = float(T.get("eval_fraction", 0) or 0)
@@ -99,9 +105,11 @@ args = SFTConfig(
     seed=T.get("seed", 42),
     eval_strategy=T.get("eval_strategy", "no") if eval_ds is not None else "no",
     per_device_eval_batch_size=T.get("per_device_eval_batch_size", 1),
+    dataloader_num_workers=2,
+    dataloader_pin_memory=True,
     push_to_hub=True,
     hub_model_id=CFG["output"]["hf_repo"],
-    hub_strategy="checkpoint",
+    hub_strategy="end",
     hub_token=TOK,
     hub_private_repo=True,
 )

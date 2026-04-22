@@ -29,7 +29,7 @@ OUT = Path("/workspace/merged")
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=BASE,
-    max_seq_length=4096,
+    max_seq_length=262144,
     load_in_4bit=False,
     dtype=torch.bfloat16,
     token=TOK,

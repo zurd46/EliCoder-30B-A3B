@@ -46,20 +46,19 @@ if gpu_total >= 88 and moe_backend != "native_torch":
     TRAIN["per_device_train_batch_size"] = 2
     TRAIN["gradient_accumulation_steps"] = max(1, TRAIN["gradient_accumulation_steps"] // 2)
     print(f"H100-NVL detected ({gpu_total:.0f}GB) — bsz=2, grad_accum={TRAIN['gradient_accumulation_steps']}")
-elif moe_backend == "native_torch":
-    # Native MoE-Loop erzeugt Aktivierungen für alle 128 Experten × top_k.
-    # Ohne gradient-checkpointing OOM-ts sofort bei 30B auf 93GB. Erzwingen.
-    TRAIN["gradient_checkpointing"] = True
+else:
+    # Fast MoE kernel (unsloth_triton / grouped_mm) aktiv → mehr VRAM frei, GC kann aus
+    TRAIN["gradient_checkpointing"] = False
     print(
-        f"H100-NVL ({gpu_total:.0f}GB) + native_torch MoE — keeping "
+        f"H100-NVL ({gpu_total:.0f}GB) + fast MoE kernel — "
         f"bsz={TRAIN['per_device_train_batch_size']}, grad_accum={TRAIN['gradient_accumulation_steps']}, "
-        "forcing gradient_checkpointing=True (native loop needs it)"
+        "gradient_checkpointing=False (speed)"
     )
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=CFG["base_model"],
     max_seq_length=TRAIN["max_seq_length"],
-    dtype=None,
+    dtype=torch.bfloat16,
     load_in_4bit=CFG["load_in_4bit"],
     token=TOK,
     device_map={"": 0},
@@ -76,6 +75,12 @@ model = FastLanguageModel.get_peft_model(
     random_state=42,
 )
 
+try:
+    model = torch.compile(model, mode="reduce-overhead")
+    print("torch.compile active (reduce-overhead)")
+except Exception as e:
+    print(f"torch.compile skipped: {e}")
+
 ds = load_dataset(TRAIN["dataset"], split=TRAIN["split"], token=TOK)
 
 def fmt(example):
@@ -83,7 +88,10 @@ def fmt(example):
         example["messages"], tokenize=False, add_generation_prompt=False
     )}
 
-ds = ds.map(fmt, remove_columns=ds.column_names)
+import hashlib
+cache_key = hashlib.md5(f"{TRAIN['dataset']}_{TRAIN['max_seq_length']}_{tokenizer.name_or_path}".encode()).hexdigest()
+cache_file = f"/workspace/cache/sft_{cache_key}.arrow"
+ds = ds.map(fmt, remove_columns=ds.column_names, cache_file_name=cache_file)
 
 eval_frac = float(TRAIN.get("eval_fraction", 0) or 0)
 eval_ds = None
@@ -123,7 +131,7 @@ args = SFTConfig(
     dataset_text_field="text",
     push_to_hub=True,
     hub_model_id=CFG["output"]["hf_repo"],
-    hub_strategy="checkpoint",
+    hub_strategy="end",
     hub_token=TOK,
     hub_private_repo=True,
 )
