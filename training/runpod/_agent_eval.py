@@ -97,8 +97,9 @@ class AgentEvalCallback(TrainerCallback):
         with torch.no_grad():
             for s in samples:
                 sys_msg = (
-                    "You are a function-calling agent. Respond with tool calls only, no prose.\n"
-                    "<tools>\n" + _json.dumps(s["tools"], ensure_ascii=False) + "\n</tools>"
+                    AGENT_SYS + "\n<tools>\n"
+                    + _json.dumps(s["tools"], ensure_ascii=False, separators=(",", ":"))
+                    + "\n</tools>"
                 )
                 messages = [
                     {"role": "system", "content": sys_msg},
@@ -123,6 +124,8 @@ class AgentEvalCallback(TrainerCallback):
                         do_sample=False,
                         pad_token_id=self.tokenizer.eos_token_id,
                         use_cache=True,
+                        stop_strings=["</tool_call>"],
+                        tokenizer=self.tokenizer,
                     )
                 except Exception as e:
                     # Generate kann bei 4-bit + Checkpointing stolpern — skip Sample.
