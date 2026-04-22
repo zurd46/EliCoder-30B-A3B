@@ -15,8 +15,16 @@ CHECKPOINT_ROOT = WORKSPACE / "checkpoints"
 CACHE_ROOT = WORKSPACE / "hf_cache"
 DEPS_MARKER = WORKSPACE / ".deps_installed"
 
+# PyTorch muss zuerst mit dem korrekten CUDA-Index installiert werden,
+# damit unsloth_zoo >=2026.4.8 funktioniert (braucht torch.int1 etc.).
+TORCH_PACKAGES = [
+    "torch==2.6.0+cu124",
+    "torchvision==0.21.0+cu124",
+    "torchaudio==2.6.0+cu124",
+]
+
 PIP_PACKAGES = [
-    "torchao==0.9.0",
+    "torchao==0.13.0",
     "unsloth @ git+https://github.com/unslothai/unsloth.git",
     "unsloth_zoo",
     "trl>=0.12", "transformers>=4.46", "datasets>=3.0",
@@ -152,6 +160,16 @@ def bootstrap(*, install: bool = True) -> Path:
 
     if install and not DEPS_MARKER.exists():
         print("installing pip deps (once per pod) …")
+        # 1. PyTorch zuerst — RunPod-Image hat 2.4.1, unsloth_zoo braucht >=2.6
+        subprocess.run(
+            [
+                sys.executable, "-m", "pip", "install", "-q",
+                "--index-url", "https://download.pytorch.org/whl/cu124",
+                *TORCH_PACKAGES,
+            ],
+            check=True,
+        )
+        # 2. Restliche Packages
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", *PIP_PACKAGES],
             check=True,
