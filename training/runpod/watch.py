@@ -10,7 +10,11 @@ Shows in a local terminal in parallel:
 
 Usage:
   pip install rich
+  # Default: direct-TCP (auto-detected via runpodctl)
   python training/runpod/watch.py
+
+  # RunPod proxy fallback (no public-TCP mapping, PTY required):
+  POD_PROXY_USER=alpqgkmttz9dhl-64411961 python training/runpod/watch.py
 
 Quit with Ctrl+C — training on the pod keeps running (nohup).
 """
@@ -40,10 +44,15 @@ except ImportError:
     sys.exit("rich missing — install with: pip install rich")
 
 # ---------- Pod connection ----------
-# POD_ID is the stable identifier — IP/port get reassigned on every stop/start.
-# We detect them via `runpodctl get pod <id>`, so the monitor keeps working after
-# a pod restart without any env tweaking. ENV overrides still take precedence.
+# Two connection modes, picked automatically:
+#   1. Direct TCP (default): host+port come from env (POD_HOST/POD_PORT) or are
+#      auto-detected via `runpodctl get pod <id>`. Fast, no PTY.
+#   2. RunPod SSH proxy: set POD_PROXY_USER="<pod-id>-<account-id>" — then we
+#      connect as POD_PROXY_USER@ssh.runpod.io. Needed when the pod has no
+#      public-TCP SSH mapping (the proxy requires a PTY — we pass -tt).
+# POD_ID is the stable identifier for direct-TCP auto-detection.
 POD_ID = os.environ.get("POD_ID", "alpqgkmttz9dhl")
+POD_PROXY_USER = os.environ.get("POD_PROXY_USER")  # e.g. "alpqgkmttz9dhl-64411961"
 SSH_USER = os.environ.get("POD_USER", "root")
 SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.ssh/id_ed25519"))
 LOG_PATH = os.environ.get("POD_LOG", "/workspace/pipeline.log")
@@ -82,19 +91,33 @@ def detect_ssh_endpoint() -> tuple[str, str]:
         sys.exit("runpodctl get pod → timeout (>15s)")
     sys.exit(f"could not find pub-tcp SSH port for {POD_ID} in runpodctl output")
 
-SSH_HOST, SSH_PORT = detect_ssh_endpoint()
-
-SSH_BASE = [
-    "ssh", "-i", SSH_KEY,
-    "-o", "StrictHostKeyChecking=no",
-    "-o", "UserKnownHostsFile=/dev/null",
-    "-o", "LogLevel=ERROR",
-    "-o", "ServerAliveInterval=30",
-    "-o", "ConnectTimeout=10",
-    "-o", "BatchMode=yes",
-    "-p", SSH_PORT,
-    f"{SSH_USER}@{SSH_HOST}",
-]
+if POD_PROXY_USER:
+    # RunPod proxy: <pod-id>-<account-id>@ssh.runpod.io, no -p, PTY required.
+    # BatchMode is intentionally omitted — the proxy needs the key-agent flow.
+    SSH_HOST = "ssh.runpod.io"
+    SSH_PORT = "22"
+    SSH_BASE = [
+        "ssh", "-tt", "-i", SSH_KEY,
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ConnectTimeout=15",
+        f"{POD_PROXY_USER}@{SSH_HOST}",
+    ]
+else:
+    SSH_HOST, SSH_PORT = detect_ssh_endpoint()
+    SSH_BASE = [
+        "ssh", "-i", SSH_KEY,
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "LogLevel=ERROR",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ConnectTimeout=10",
+        "-o", "BatchMode=yes",
+        "-p", SSH_PORT,
+        f"{SSH_USER}@{SSH_HOST}",
+    ]
 
 # ---------- State ----------
 @dataclass
@@ -659,7 +682,9 @@ def build_view() -> Layout:
 # ---------- Main ----------
 def preflight_ssh(console: Console) -> bool:
     """Test the SSH connection before launching the TUI — clear error on bad key/host."""
-    console.print(f"[dim]Preflight: testing SSH to {SSH_USER}@{SSH_HOST}:{SSH_PORT}…[/dim]")
+    who = POD_PROXY_USER if POD_PROXY_USER else f"{SSH_USER}@{SSH_HOST}:{SSH_PORT}"
+    mode = "proxy" if POD_PROXY_USER else "direct"
+    console.print(f"[dim]Preflight: testing SSH ({mode}) to {who}…[/dim]")
     cmd = SSH_BASE + ["echo ok"]
     try:
         out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=15, text=True)
@@ -682,7 +707,11 @@ def main() -> None:
 
     if not preflight_ssh(console):
         console.print("\n[bold yellow]Hint:[/bold yellow] check POD_HOST / POD_PORT / POD_KEY env vars, or try manually:")
-        console.print(f"[dim]  ssh -i {SSH_KEY} -p {SSH_PORT} {SSH_USER}@{SSH_HOST} 'echo ok'[/dim]")
+        if POD_PROXY_USER:
+            console.print(f"[dim]  ssh -tt -i {SSH_KEY} {POD_PROXY_USER}@ssh.runpod.io 'echo ok'[/dim]")
+        else:
+            console.print(f"[dim]  ssh -i {SSH_KEY} -p {SSH_PORT} {SSH_USER}@{SSH_HOST} 'echo ok'[/dim]")
+            console.print("[dim]Proxy fallback: export POD_PROXY_USER=<pod-id>-<account-id>  (see RunPod 'Connect → SSH over exposed TCP / Proxy')[/dim]")
         sys.exit(1)
 
     console.print(f"[dim]starting live monitor — log={LOG_PATH}  gpu-poll={GPU_POLL_SEC}s  disk-poll={DISK_POLL_SEC}s[/dim]")
