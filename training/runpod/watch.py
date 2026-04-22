@@ -46,7 +46,7 @@ except ImportError:
 POD_ID = os.environ.get("POD_ID", "alpqgkmttz9dhl")
 SSH_USER = os.environ.get("POD_USER", "root")
 SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.ssh/id_ed25519"))
-LOG_PATH = os.environ.get("POD_LOG", "/workspace/sft.log")
+LOG_PATH = os.environ.get("POD_LOG", "/workspace/pipeline.log")
 CKPT_DIR = os.environ.get("POD_CKPT", "/workspace/checkpoints/sft-phase-a")
 WORKSPACE_PATH = os.environ.get("POD_WORKSPACE", "/workspace")
 GPU_POLL_SEC = float(os.environ.get("GPU_POLL_SEC", "2"))
@@ -173,12 +173,22 @@ SAVE_STEP_RE = re.compile(r"checkpoint-(\d+)")
 WANDB_URL_RE = re.compile(r"https://wandb\.ai/\S+?/runs/\S+")
 
 PHASE_HINTS = [
+    ("PHASE 01",         "Dataset-Build"),
+    ("PHASE 02",         "SFT Training"),
+    ("PHASE 03",         "DPO Training"),
+    ("PHASE 04",         "LongCtx Training"),
+    ("PHASE 05",         "Export / Merge"),
     ("Loading weights",  "Loading weights (shards)"),
     ("Fast downloading", "Model download"),
     ("tokenizing",       "Tokenization"),
     ("Map",              "Dataset preprocessing"),
     ("packing",          "Packing"),
     ("Num examples",     "Trainer init"),
+    ("loading SFT",      "Dataset-Build: SFT sources"),
+    ("loading DPO",      "Dataset-Build: DPO sources"),
+    ("SFT total",        "Dataset-Build: SFT done"),
+    ("DPO total",        "Dataset-Build: DPO done"),
+    ("LongCtx total",    "Dataset-Build: LongCtx done"),
 ]
 
 def detect_phase(line: str) -> Optional[str]:
@@ -447,7 +457,7 @@ def header_panel() -> Panel:
         t.add_row("Training for", fmt_td((datetime.now() - TRAIN.training_started_at).total_seconds()))
     elif TRAIN.started_at:
         t.add_row("Setup for", fmt_td((datetime.now() - TRAIN.started_at).total_seconds()))
-    return Panel(t, title="[bold]SFT Training[/bold]", border_style="cyan")
+    return Panel(t, title="[bold]Fine-Tuning Progress[/bold]", border_style="cyan")
 
 def metrics_panel() -> Panel:
     t = Table.grid(padding=(0, 2))
@@ -472,7 +482,7 @@ def metrics_panel() -> Panel:
         # Shorten the url for display, keep full in OSC-8 hyperlink so cmd-click works
         short = TRAIN.wandb_url.split("/runs/", 1)[-1][:24]
         t.add_row("WandB", f"[link={TRAIN.wandb_url}]…/runs/{short}[/link]")
-    return Panel(t, title="[bold]Trainer metrics[/bold]", border_style="magenta")
+    return Panel(t, title="[bold]Metrics[/bold]", border_style="magenta")
 
 def gpu_panel() -> Panel:
     if not GPU.alive:
