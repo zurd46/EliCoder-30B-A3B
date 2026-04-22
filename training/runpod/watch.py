@@ -145,6 +145,12 @@ class TrainState:
     last_eval_step: int = 0
     last_eval_runtime: Optional[float] = None
     first_eval_loss: Optional[float] = None  # baseline for the delta arrow
+    # Agent-eval metrics (from AgentEvalCallback — see _agent_eval.py)
+    last_agent_parse_rate: Optional[float] = None
+    last_agent_name_match: Optional[float] = None
+    last_agent_avg_tokens: Optional[float] = None
+    last_agent_step: int = 0
+    first_agent_avg_tokens: Optional[float] = None  # baseline for Mac-speed trend
     # Checkpoint tracking
     saves: list = field(default_factory=list)  # sorted step numbers
     last_save_step: Optional[int] = None
@@ -190,6 +196,12 @@ GRAD_RE = re.compile(r"'grad_norm'\s*:\s*'?([0-9.eE+-]+)'?")
 EPOCH_RE = re.compile(r"'epoch'\s*:\s*'?([0-9.eE+-]+)'?")
 EVAL_LOSS_RE = re.compile(r"'eval_loss'\s*:\s*'?([0-9.eE+-]+)'?")
 EVAL_RUNTIME_RE = re.compile(r"'eval_runtime'\s*:\s*'?([0-9.eE+-]+)'?")
+# AgentEvalCallback logs lines like:
+#   [agent-eval] step=100 {'agent/parse_rate': 0.94, 'agent/name_match': 0.88, 'agent/avg_output_tokens': 72.5}
+AGENT_STEP_RE   = re.compile(r"\[agent-eval\]\s+step=(\d+)")
+AGENT_PARSE_RE  = re.compile(r"'agent/parse_rate'\s*:\s*([0-9.eE+-]+)")
+AGENT_NAME_RE   = re.compile(r"'agent/name_match'\s*:\s*([0-9.eE+-]+)")
+AGENT_TOKENS_RE = re.compile(r"'agent/avg_output_tokens'\s*:\s*([0-9.eE+-]+)")
 TOTAL_STEPS_RE = re.compile(r"Total steps\s*=\s*([0-9,]+)")
 STEP_TIME_RE = re.compile(r"(\d+(?:\.\d+)?)(s|min)/it")
 SAVE_STEP_RE = re.compile(r"checkpoint-(\d+)")
