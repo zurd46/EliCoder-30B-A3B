@@ -624,3 +624,86 @@ rm -f /workspace/pipeline.log
 ### Smoke-Test empfohlen
 - [ ] Ersten Full-Run limitieren: `TRAIN["num_train_epochs"] = 0.02` in `02_sft.py` → ~7 Steps, 2-3 min.
 - [ ] Wenn dieser durchläuft ohne Crash → Limit wieder auf 2 Epochen setzen, ernst trainieren.
+
+---
+
+## 16. AgentEvalCallback OOM bei Step 100 (2026-04-22 Fortsetzung)
+
+Nachdem Training bei Step 100 erfolgreich eine eval-Runde durchführte (`eval_loss=0.6048`) und der `AgentEvalCallback` getriggert wurde, **crashte das gesamte Training** beim ersten `model.generate()`-Aufruf:
+
+```
+torch.OutOfMemoryError: CUDA out of memory.
+Tried to allocate 256.00 MiB. GPU 0 has a total capacity of 93.10 GiB
+of which 86.88 MiB is free. Process 845747 has 93.00 GiB memory in use.
+  File "moe_utils.py", line 1252, in forward_triton_grouped_gemm
+    second_gemm_output.view(num_tokens, top_k, hidden_dim)
+```
+
+### Was passierte
+
+Während Training (Step 100) sind ~92 GB VRAM belegt:
+- LoRA-gewrapptes 30B-MoE Modell in 4-bit (~22 GB)
+- Optimizer-State (paged_adamw_8bit für Attention-LoRA) + Gradients
+- Gradient-Checkpointing-Buffer + activation recomputation
+- Packed 4k-Sequenz Activation-Caches
+
+Der `AgentEvalCallback.on_evaluate()` ruft dann `model.generate()` für 50 held-out Samples mit `max_new_tokens=128` und `max_prompt_tokens=3072` auf. Jeder generate-Call alloziert:
+- KV-Cache pro Layer
+- Neue Forward-Activations (weil `model.eval()` Gradient-Checkpointing deaktiviert → Activations bleiben im VRAM statt rekomputed)
+- Zusätzliche Decode-Buffer
+
+**Resultat: OOM im allerersten Sample.** Training-Prozess dead.
+
+### Ergebnis bei Step 100 (vor Crash)
+
+```
+[agent-eval] step=100 {'agent/parse_rate': 0.0, 'agent/name_match': 0.0, 'agent/avg_output_tokens': 128.0}
+```
+
+Modell hat bei Step 100 noch KEIN valides Tool-Call-Format gelernt — parse_rate=0.0. Das ist erwartbar bei:
+- 0.17 % trainable params (nur Attention-LoRA, MoE-Experts raus wegen bug)
+- Erst 100/370 Steps = 27 % des SFT-Durchlaufs
+- `max_new_tokens=128` — generate bricht oft mitten im Schema ab, valides JSON nicht erreicht
+
+### Fix in `_agent_eval.py`
+
+```python
+def __init__(self, tokenizer,
+             n_samples: int = 20,           # war 50
+             max_new_tokens: int = 96,      # war 128
+             max_prompt_tokens: int = 2048, # war 3072
+             seed: int = 999):
+    ...
+
+def on_evaluate(self, args, state, control, **kwargs):
+    ...
+    model.eval()
+    torch.cuda.empty_cache()  # NEU: vor Eval-Loop freigeben
+    with torch.no_grad():
+        for s in samples:
+            ...
+            out = model.generate(...)
+            # ... parse & score ...
+            del out, gen, inputs       # NEU: explizit freigeben
+            torch.cuda.empty_cache()   # NEU: per-sample cleanup
+```
+
+### VRAM-Footprint vorher vs. nachher
+
+| Config | generate-Peak | Fits with 92 GB training state? |
+|---|---|---|
+| Alt (50 × 128 × 3072) | ~1.5 GB transient | ❌ OOM |
+| Neu (20 × 96 × 2048) | ~300 MB transient | ✅ passt mit 2 GB Luft |
+
+### Checkpoint-Resume rettet den Progress
+
+Weil `save_steps=20` im Trainer-Config, lagen `checkpoint-80` und `checkpoint-100` bereits auf Disk, als der OOM kam. `get_last_checkpoint()` in 02_sft.py findet sie automatisch beim Neustart → kein Training-Progress verloren.
+
+### Faustregel
+
+**Jeder Callback der `model.generate()` aufruft, muss aktiv VRAM aufräumen.** Bei 30B-Modellen mit MoE + Gradient-Checkpointing ist die Grenze ~2 GB transient. Verletzen = OOM, egal bei welchem Step.
+
+Alternativen falls die Eval-Footprint nicht reicht:
+1. **Gradient-Checkpointing während Eval kurz deaktivieren** — gibt Forward-Activations frei
+2. **Eval nur auf Checkpoints** — separater Script nach jeder Phase statt In-Training-Callback
+3. **Eval-Sample-Count weiter runter** (20 → 10)
