@@ -75,6 +75,11 @@ model = FastLanguageModel.get_peft_model(
     bias="none",
     use_gradient_checkpointing=("unsloth" if TRAIN.get("gradient_checkpointing", True) else False),
     random_state=42,
+    # Pflicht für Qwen3-MoE: ohne diesen Flag shape-mismatcht LoRA auf
+    # gate_proj/up_proj/down_proj mit dem MoE-Forward — egal welcher Kernel.
+    # Unsloth wrappt damit die Expert-Layer so, dass LoRA-Deltas korrekt
+    # pro Expert addiert werden.
+    finetune_all_experts=CFG["lora"].get("finetune_all_experts", False),
 )
 
 ds = load_dataset(TRAIN["dataset"], split=TRAIN["split"], token=TOK)

@@ -16,7 +16,10 @@ lora:
     - up_proj
     - down_proj
   use_rslora: true
-  finetune_all_experts: false
+  # Bei target_modules inkl. gate_proj/up_proj/down_proj MUSS das TRUE sein,
+  # sonst shape-mismatched LoRA mit dem MoE-Forward (Tensor 2048 vs 768 Crash).
+  # Unsloth-spezifisches Flag — wird in 02_sft.py an get_peft_model() gereicht.
+  finetune_all_experts: true
 
 training:
   dataset: zurd46/EliCoder-Dataset-SFT
