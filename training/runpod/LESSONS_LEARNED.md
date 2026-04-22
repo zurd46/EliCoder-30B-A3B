@@ -326,6 +326,64 @@ nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader
 | `CUDA out of memory` beim ersten Forward | max_seq zu groß für bsz=2 | `bsz=1 + gradient_checkpointing=True` |
 | `torch.compile incompatible with 4-bit + PEFT` | bekannt, nicht fixbar | nicht nutzen — `compile=False` |
 | `FA2 = False` trotz Install | falsche wheel-Matrix | Matrix prüfen (cu12/torch2.6/cp311/cxx11abiFALSE) |
+| `size of tensor a (2048) must match tensor b (768)` beim 1. Step | `grouped_mm` × LoRA-auf-MoE-Experts | `UNSLOTH_MOE_BACKEND=unsloth_triton` in `.env` — siehe Sektion 11b |
+| `RuntimeError` beim ersten Training-Step, GPU util = 0 | Backend/Kernel-Mismatch | Stack-Trace in pipeline.log prüfen — oft MoE × LoRA oder FA2-Kollision |
+
+---
+
+## 11b. GROSSE FALLE: grouped_mm × LoRA-auf-MoE-Experts = Shape-Crash 🔴
+
+**Symptom** (im ersten Training-Step):
+
+```
+File "/usr/local/lib/python3.11/dist-packages/accelerate/utils/operations.py", line 823, in forward
+    second_gemm_output = second_gemm_output + lora_delta
+RuntimeError: The size of tensor a (2048) must match the size of tensor b (768) at non-singleton dimension 1
+```
+
+**Ursache:** Wenn `configs/sft.yaml` `target_modules` **`gate_proj`, `up_proj`, `down_proj` enthält** (also LoRA auf MoE-Expert-Projektionen), kollidiert das mit Unsloth's schnellstem MoE-Backend `grouped_mm`:
+
+- `grouped_mm` verarbeitet **alle Experts zusammen** in einem GEMM → Output-Shape `[total_tokens_across_experts × hidden]` (z. B. 2048)
+- LoRA-Adapter produzieren ein Delta **pro Expert** mit Shape `[single_expert_tokens × hidden]` (z. B. 768)
+- Addition scheitert an non-singleton dim 1
+
+Das tritt **nur** beim ersten Training-Step auf — Loading, Tokenize, Packing, Trainer-Init sind alle ok. Man verliert dadurch ~15 min Setup-Zeit pro Crash.
+
+**Welches Backend wählt Unsloth automatisch?** Bei `UNSLOTH_MOE_BACKEND=auto` mit torch 2.8 + triton 3.4 (TMA verfügbar) pickt Unsloth `grouped_mm` als fastest. Das crasht mit unseren MoE-LoRA-Targets.
+
+### Fix: `unsloth_triton` erzwingen
+
+In `/workspace/.env`:
+```bash
+UNSLOTH_MOE_BACKEND=unsloth_triton
+```
+
+Oder vor dem Python-Start als env var. `unsloth_triton` ist auch TMA-beschleunigt (nicht wie der langsame `native_torch` Fallback), hat aber eine LoRA-kompatible Kernel-Struktur.
+
+### Kompatibilitäts-Matrix MoE-Backend × LoRA-Target
+
+| Backend | LoRA auf q/k/v/o | LoRA auf gate/up/down (MoE-Experts) | Speed |
+|---|---|---|---|
+| `native_torch` | ✓ | ✓ | 🔴 sehr langsam |
+| `unsloth_triton` | ✓ | ✓ | 🟢 schnell (TMA) |
+| `grouped_mm` | ✓ | **✗** — Shape-Crash | 🟢🟢 am schnellsten |
+
+**Faustregel:** Wenn `target_modules` in sft.yaml MoE-Experts enthält → immer `UNSLOTH_MOE_BACKEND=unsloth_triton` explizit setzen. Nicht auf `auto` vertrauen.
+
+### Alternative: LoRA auf MoE-Experts weglassen
+
+```yaml
+# sft.yaml
+lora:
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    # gate_proj / up_proj / down_proj NICHT drin
+```
+
+Dann kann `grouped_mm` aktiv bleiben (~2× schneller als `unsloth_triton`). **Nachteil:** MoE-Router-Adaption fällt weg — für reine Agentik-Runs ist das aber oft die bessere Wahl, weil die Tool-Routing-Entscheidung eher aus Attention als aus Expert-Routing kommt.
 
 ---
 
