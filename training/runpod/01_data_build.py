@@ -32,6 +32,16 @@ OWNER = os.environ.get("CODERLLM_HF_OWNER", "zurd46")
 TOK = os.environ["HF_TOKEN"]
 random.seed(42)
 
+# Welche Datasets gebaut & gepusht werden. "all" = SFT + DPO + LongCtx (default).
+# "dpo" = nur DPO rebuilden (wenn SFT-Adapter unverändert bleibt → spart ~20 min).
+# "sft,dpo" etc. für Teilmengen.
+BUILD = set(
+    x.strip() for x in os.environ.get("CODERLLM_BUILD", "all").split(",") if x.strip()
+)
+if "all" in BUILD:
+    BUILD = {"sft", "dpo", "longctx"}
+print(f"build targets: {sorted(BUILD)}")
+
 MAX_PER_SOURCE = {
     "xlam_tool_calls":     60_000,  # BFCL-Style single-turn Function-Calls (max)
     "glaive_fc_v2":        25_000,  # Diverse Tool-Schemas + Dialog-Kontext
@@ -216,36 +226,38 @@ def load_swe_verified(n: int):
     return Dataset.from_list(out)
 
 
-print("loading SFT sources (Agentik-Fokus) …")
-loaders = [
-    (load_xlam_tool_calls, "xlam_tool_calls"),
-    (load_glaive_fc_v2,    "glaive_fc_v2"),
-    (load_toolace,         "toolace"),
-    (load_hermes_fc,       "hermes_fc"),
-    (load_swe_verified,    "swe_verified"),
-]
+if "sft" in BUILD:
+    print("loading SFT sources (Agentik-Fokus) …")
+    loaders = [
+        (load_xlam_tool_calls, "xlam_tool_calls"),
+        (load_glaive_fc_v2,    "glaive_fc_v2"),
+        (load_toolace,         "toolace"),
+        (load_hermes_fc,       "hermes_fc"),
+        (load_swe_verified,    "swe_verified"),
+    ]
 
-from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
 
-def _load_worker(fn_key):
-    fn, key = fn_key
-    try:
-        d = fn(MAX_PER_SOURCE[key])
-        print(f"  {key}: {len(d)}")
-        return d
-    except Exception as e:
-        print(f"  {key}: SKIPPED ({e})")
-        return None
+    def _load_worker(fn_key):
+        fn, key = fn_key
+        try:
+            d = fn(MAX_PER_SOURCE[key])
+            print(f"  {key}: {len(d)}")
+            return d
+        except Exception as e:
+            print(f"  {key}: SKIPPED ({e})")
+            return None
 
-parts = []
-with ThreadPoolExecutor(max_workers=4) as ex:
-    results = list(ex.map(_load_worker, loaders))
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        results = list(ex.map(_load_worker, loaders))
 
-parts = [r for r in results if r is not None]
+    parts = [r for r in results if r is not None]
 
-sft = concatenate_datasets(parts).shuffle(seed=42)
-print(f"\nSFT total: {len(sft)} samples")
-sft.push_to_hub(f"{OWNER}/EliCoder-Dataset-SFT", private=True, token=TOK)
+    sft = concatenate_datasets(parts).shuffle(seed=42)
+    print(f"\nSFT total: {len(sft)} samples")
+    sft.push_to_hub(f"{OWNER}/EliCoder-Dataset-SFT", private=True, token=TOK)
+else:
+    print("SFT: skipped (CODERLLM_BUILD='" + os.environ.get("CODERLLM_BUILD", "all") + "')")
 
 
 # ── DPO — Synthetic Agent-Conciseness ────────────────────────────────────────
@@ -345,10 +357,13 @@ def build_agent_dpo(n: int, min_length_gap: float = 1.5):
     return Dataset.from_list(out)
 
 
-print("\nbuilding Agent-DPO (synthetic concise-vs-verbose) …")
-dpo = build_agent_dpo(50_000).shuffle(seed=42)
-print(f"DPO total: {len(dpo)}")
-dpo.push_to_hub(f"{OWNER}/EliCoder-Dataset-DPO", private=True, token=TOK)
+if "dpo" in BUILD:
+    print("\nbuilding Agent-DPO (synthetic concise-vs-verbose) …")
+    dpo = build_agent_dpo(50_000).shuffle(seed=42)
+    print(f"DPO total: {len(dpo)}")
+    dpo.push_to_hub(f"{OWNER}/EliCoder-Dataset-DPO", private=True, token=TOK)
+else:
+    print("DPO: skipped")
 
 
 # ── LongCtx — Agentisches Needle-in-Haystack über Tool-Schemas ───────────────
@@ -450,13 +465,19 @@ def synth_long_ctx_agentic(n: int, lengths=(16_000, 32_000, 64_000, 128_000)):
     return Dataset.from_list(out)
 
 
-longctx = synth_long_ctx_agentic(6_000)
-print(f"\nLongCtx total: {len(longctx)}")
-longctx.push_to_hub(f"{OWNER}/EliCoder-Dataset-LongCtx", private=True, token=TOK)
+if "longctx" in BUILD:
+    longctx = synth_long_ctx_agentic(6_000)
+    print(f"\nLongCtx total: {len(longctx)}")
+    longctx.push_to_hub(f"{OWNER}/EliCoder-Dataset-LongCtx", private=True, token=TOK)
+else:
+    print("LongCtx: skipped")
 
-print("\nall datasets pushed:")
-print(f"  SFT:     huggingface.co/datasets/{OWNER}/EliCoder-Dataset-SFT")
-print(f"  DPO:     huggingface.co/datasets/{OWNER}/EliCoder-Dataset-DPO")
-print(f"  LongCtx: huggingface.co/datasets/{OWNER}/EliCoder-Dataset-LongCtx")
+print("\ndatasets:")
+if "sft" in BUILD:
+    print(f"  SFT:     huggingface.co/datasets/{OWNER}/EliCoder-Dataset-SFT")
+if "dpo" in BUILD:
+    print(f"  DPO:     huggingface.co/datasets/{OWNER}/EliCoder-Dataset-DPO")
+if "longctx" in BUILD:
+    print(f"  LongCtx: huggingface.co/datasets/{OWNER}/EliCoder-Dataset-LongCtx")
 
 Path("/workspace/.phase01_done").touch()
