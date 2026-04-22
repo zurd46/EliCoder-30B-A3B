@@ -17,19 +17,37 @@ DEPS_MARKER = WORKSPACE / ".deps_installed"
 
 # PyTorch muss zuerst mit dem korrekten CUDA-Index installiert werden,
 # damit unsloth_zoo >=2026.4.8 funktioniert (braucht torch.int1 etc.).
+# CUDA 12.4 on RunPod-Image → torch 2.6 ist das Maximum. torch 2.6 pinnt strict
+# triton==3.2.0 (fehlt tl.make_tensor_descriptor → native_torch MoE fallback).
+# Flash Attention 2 kompensiert das teilweise (1.5–2× Speedup vs xformers).
 TORCH_PACKAGES = [
     "torch==2.6.0+cu124",
     "torchvision==0.21.0+cu124",
     "torchaudio==2.6.0+cu124",
 ]
 
+# Pre-built Flash-Attention-2 wheel für unsere exakte Version-Matrix:
+#   cu12.x · torch 2.6 · cp311 · cxx11abiFALSE · x86_64
+# Auf 30B-MoE die einzige sinnvolle Attention (FA3 existiert nicht für H100+BF16
+# stable im Unsloth-Pfad).
+FLASH_ATTN_WHEEL = (
+    "https://github.com/Dao-AILab/flash-attention/releases/download/"
+    "v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-"
+    "cp311-cp311-linux_x86_64.whl"
+)
+
 PIP_PACKAGES = [
+    # Triton EXPLIZIT pinnen — ohne Pin zieht pip-resolver manchmal 3.3+ das
+    # mit torch 2.6's _inductor inkompatibel ist (AttrsDescriptor removed).
+    "triton==3.2.0",
     "torchao==0.13.0",
     "unsloth @ git+https://github.com/unslothai/unsloth.git",
     "unsloth_zoo",
     "trl>=0.12", "transformers>=4.46", "datasets>=3.0",
     "peft>=0.13", "accelerate>=1.0", "bitsandbytes", "wandb", "pyyaml",
     "huggingface_hub>=0.25", "tqdm",
+    # Flash Attention 2 direkt von GitHub-Release (kein build-isolation nötig).
+    FLASH_ATTN_WHEEL,
 ]
 
 
