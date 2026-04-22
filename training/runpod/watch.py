@@ -602,13 +602,26 @@ def metrics_panel() -> Panel:
         t.add_row("Eval", "[dim]starts at step 20[/dim]" if is_training_phase else "[dim]—[/dim]")
 
     # ── Agent-Eval (Tool-Call-Qualität + Mac-Speed-Proxy) ─────────────────
+    # Wird vom AgentEvalCallback in _agent_eval.py nach jedem trainer.evaluate()
+    # gefüllt — d.h. ab step = eval_steps (sft: 100, dpo: 200). Bis dahin zeigen
+    # wir einen klar sichtbaren Wait-Placeholder, damit nicht der Eindruck
+    # entsteht, der Block sei ganz raus oder kaputt.
     has_agent = (
         TRAIN.last_agent_parse_rate is not None
         or TRAIN.last_agent_name_match is not None
         or TRAIN.last_agent_avg_tokens is not None
     )
-    if has_agent:
-        t.add_row("", "")  # Separator vor Agent-Block
+    t.add_row("", "")  # Separator vor Agent-Block (immer)
+    if not has_agent:
+        phase_eval_steps = {"SFT Training": 100, "DPO Training": 200}.get(TRAIN.phase, 100)
+        if is_training_phase:
+            wait = f"[dim]waits for step {phase_eval_steps} ([b]first trainer eval[/b])[/dim]"
+        else:
+            wait = "[dim]active during SFT / DPO training only[/dim]"
+        t.add_row("[magenta]Agent parse[/magenta]",      wait)
+        t.add_row("[magenta]Tool-name match[/magenta]",  "[dim]—[/dim]")
+        t.add_row("[magenta]Out-tokens/call[/magenta]",  "[dim]—[/dim]  ([dim]Mac-speed proxy[/dim])")
+    else:
         step_suffix = f" (step {TRAIN.last_agent_step})" if TRAIN.last_agent_step else ""
         if TRAIN.last_agent_parse_rate is not None:
             pct = TRAIN.last_agent_parse_rate * 100
