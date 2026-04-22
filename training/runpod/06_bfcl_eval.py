@@ -51,6 +51,14 @@ os.environ.setdefault("WANDB_NAME", "bfcl-eval-runpod")
 
 _TOOL_CALL_RE = _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL)
 
+# Muss identisch zum Trainings-Prompt in 01_data_build.py sein — sonst widerspricht
+# der Eval-Prompt dem gelernten Signal.
+AGENT_SYS = (
+    "You are a function-calling agent. Respond with tool calls only, no prose.\n"
+    "Emit one <tool_call>…</tool_call> block per call, JSON on a single line, "
+    "compact (no spaces). End immediately after the last </tool_call>."
+)
+
 
 def _parse_calls(text: str):
     """Extrahiere alle <tool_call>…</tool_call>-Blöcke als dict-Liste."""
@@ -127,7 +135,7 @@ def _row_to_prompt_and_gold(row: dict):
     return tools, row.get("query", ""), gold_calls
 
 
-def _eval_subset(model, tokenizer, rows: list, label: str, max_new_tokens: int = 512):
+def _eval_subset(model, tokenizer, rows: list, label: str, max_new_tokens: int = 128):
     parse_ok = 0
     name_ok = 0
     args_ok = 0
@@ -144,8 +152,9 @@ def _eval_subset(model, tokenizer, rows: list, label: str, max_new_tokens: int =
             continue
 
         sys_msg = (
-            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
-            "<tools>\n" + _json.dumps(tools, ensure_ascii=False) + "\n</tools>"
+            AGENT_SYS + "\n<tools>\n"
+            + _json.dumps(tools, ensure_ascii=False, separators=(",", ":"))
+            + "\n</tools>"
         )
         messages = [
             {"role": "system", "content": sys_msg},
@@ -164,6 +173,8 @@ def _eval_subset(model, tokenizer, rows: list, label: str, max_new_tokens: int =
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
                 use_cache=True,
+                stop_strings=["</tool_call>"],
+                tokenizer=tokenizer,
             )
         dt = time.perf_counter() - t0
 

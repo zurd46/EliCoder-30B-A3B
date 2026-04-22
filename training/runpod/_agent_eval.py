@@ -21,6 +21,14 @@ from transformers import TrainerCallback
 
 _TOOL_CALL_RE = _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL)
 
+# Muss identisch zum Trainings-Prompt in 01_data_build.py sein — sonst
+# widerspricht der Eval-Prompt dem gelernten Signal.
+AGENT_SYS = (
+    "You are a function-calling agent. Respond with tool calls only, no prose.\n"
+    "Emit one <tool_call>…</tool_call> block per call, JSON on a single line, "
+    "compact (no spaces). End immediately after the last </tool_call>."
+)
+
 
 def _parse_tool_call(text: str) -> Optional[dict]:
     m = _TOOL_CALL_RE.search(text)
@@ -36,7 +44,7 @@ class AgentEvalCallback(TrainerCallback):
     """Periodische Agent-Qualitäts-Eval auf xLAM-Held-out-Samples."""
 
     def __init__(self, tokenizer, n_samples: int = 50, seed: int = 999,
-                 max_new_tokens: int = 256, max_prompt_tokens: int = 3072):
+                 max_new_tokens: int = 128, max_prompt_tokens: int = 3072):
         self.tokenizer = tokenizer
         self.n_samples = n_samples
         self.max_new_tokens = max_new_tokens
