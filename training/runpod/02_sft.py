@@ -36,23 +36,23 @@ CFG = yaml.safe_load(Path("configs/sft.yaml").read_text())
 CKPT = checkpoint_dir("sft-phase-a")
 print(f"checkpoints → {CKPT}")
 
-# H100-NVL (94GB) Overrides — doppelter Batch, halbe Accum
-# Nur wenn der gefusete Triton-MoE-Kernel aktiv ist. Der native_torch-Fallback
-# (Loop über alle Experten) braucht pro Token deutlich mehr VRAM und OOMt bei bsz=2.
+# Config values win by default. Opt-in overrides only:
+#   UNSLOTH_BIG_BATCH=1  → doppelter per_device batch (bsz=2) + halber grad_accum.
+#     Nur sicher wenn der fast Triton-MoE-Kernel aktiv ist UND max_seq_length klein.
+#     Auf H100-NVL + bsz=2 + max_seq=6144 OOMt der native_torch-Fallback in repeat_kv.
 TRAIN = dict(CFG["training"])
 gpu_total = torch.cuda.get_device_properties(0).total_memory / 1024**3
-moe_backend = os.environ.get("UNSLOTH_MOE_BACKEND", "")
-if gpu_total >= 88 and moe_backend != "native_torch":
-    TRAIN["per_device_train_batch_size"] = 2
-    TRAIN["gradient_accumulation_steps"] = max(1, TRAIN["gradient_accumulation_steps"] // 2)
-    print(f"H100-NVL detected ({gpu_total:.0f}GB) — bsz=2, grad_accum={TRAIN['gradient_accumulation_steps']}")
+if os.environ.get("UNSLOTH_BIG_BATCH") == "1" and gpu_total >= 88:
+    TRAIN["per_device_train_batch_size"] = max(TRAIN.get("per_device_train_batch_size", 1), 2)
+    TRAIN["gradient_accumulation_steps"] = max(1, TRAIN.get("gradient_accumulation_steps", 1) // 2)
+    print(f"UNSLOTH_BIG_BATCH opt-in on {gpu_total:.0f}GB GPU — "
+          f"bsz={TRAIN['per_device_train_batch_size']}, grad_accum={TRAIN['gradient_accumulation_steps']}")
 else:
-    # Fast MoE kernel (unsloth_triton / grouped_mm) aktiv → mehr VRAM frei, GC kann aus
-    TRAIN["gradient_checkpointing"] = False
     print(
-        f"H100-NVL ({gpu_total:.0f}GB) + fast MoE kernel — "
+        f"GPU {gpu_total:.0f}GB — using config values: "
         f"bsz={TRAIN['per_device_train_batch_size']}, grad_accum={TRAIN['gradient_accumulation_steps']}, "
-        "gradient_checkpointing=False (speed)"
+        f"gradient_checkpointing={TRAIN.get('gradient_checkpointing', True)}, "
+        f"max_seq={TRAIN['max_seq_length']}"
     )
 
 model, tokenizer = FastLanguageModel.from_pretrained(
