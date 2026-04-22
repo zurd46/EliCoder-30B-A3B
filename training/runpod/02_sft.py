@@ -75,12 +75,6 @@ model = FastLanguageModel.get_peft_model(
     random_state=42,
 )
 
-try:
-    model = torch.compile(model, mode="reduce-overhead")
-    print("torch.compile active (reduce-overhead)")
-except Exception as e:
-    print(f"torch.compile skipped: {e}")
-
 ds = load_dataset(TRAIN["dataset"], split=TRAIN["split"], token=TOK)
 
 def fmt(example):
