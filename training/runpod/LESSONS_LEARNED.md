@@ -351,14 +351,50 @@ Das tritt **nur** beim ersten Training-Step auf — Loading, Tokenize, Packing, 
 
 **Welches Backend wählt Unsloth automatisch?** Bei `UNSLOTH_MOE_BACKEND=auto` mit torch 2.8 + triton 3.4 (TMA verfügbar) pickt Unsloth `grouped_mm` als fastest. Das crasht mit unseren MoE-LoRA-Targets.
 
-### Fix: `unsloth_triton` erzwingen
+### Fix: `finetune_all_experts=True` an Unsloth durchreichen
 
-In `/workspace/.env`:
+**Das ist der EIGENTLICHE Fix** — `UNSLOTH_MOE_BACKEND=unsloth_triton` alleine **behebt das Problem NICHT**. Der Crash tritt auch mit `unsloth_triton` auf, weil das Problem nicht im Kernel liegt, sondern in der **LoRA-Adapter-Verkabelung auf MoE-Experts**.
+
+In [02_sft.py](02_sft.py) an `FastLanguageModel.get_peft_model()`:
+
+```python
+model = FastLanguageModel.get_peft_model(
+    model,
+    r=…,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
+                    "gate_proj", "up_proj", "down_proj"],
+    # Unsloth-spezifisch — wrappt LoRA so dass deltas korrekt pro-Expert
+    # addiert werden. Ohne True: Shape-Mismatch beim ersten Forward.
+    finetune_all_experts=True,
+    …
+)
+```
+
+Und in [../configs/sft.yaml](../configs/sft.yaml):
+
+```yaml
+lora:
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+  finetune_all_experts: true   # PFLICHT wenn MoE-Experts in target_modules
+```
+
+### Optional zusätzlich: `unsloth_triton` statt `grouped_mm`
+
+`grouped_mm` ist ~2× schneller als `unsloth_triton`, funktioniert aber nicht mit finetuned Experts auf allen Versionen. Sicherer Pfad:
+
 ```bash
+# /workspace/.env
 UNSLOTH_MOE_BACKEND=unsloth_triton
 ```
 
-Oder vor dem Python-Start als env var. `unsloth_triton` ist auch TMA-beschleunigt (nicht wie der langsame `native_torch` Fallback), hat aber eine LoRA-kompatible Kernel-Struktur.
+Beides zusammen (`finetune_all_experts=True` + `unsloth_triton`) ist die getestete-stabile Kombo.
 
 ### Kompatibilitäts-Matrix MoE-Backend × LoRA-Target
 
