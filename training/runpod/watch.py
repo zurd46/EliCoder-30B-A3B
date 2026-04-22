@@ -14,7 +14,7 @@ Usage:
   python training/runpod/watch.py
 
   # RunPod proxy fallback (no public-TCP mapping, PTY required):
-  POD_PROXY_USER=alpqgkmttz9dhl-64411961 python training/runpod/watch.py
+  POD_PROXY_USER=hclm1ea4ll1i5c-64411720 python training/runpod/watch.py
 
 Quit with Ctrl+C — training on the pod keeps running (nohup).
 """
@@ -52,8 +52,8 @@ except ImportError:
 #      connect as POD_PROXY_USER@ssh.runpod.io. Needed when the pod has no
 #      public-TCP SSH mapping (the proxy requires a PTY — we pass -tt).
 # POD_ID is the stable identifier for direct-TCP auto-detection.
-POD_ID = os.environ.get("POD_ID", "3xc1b6nzhkgmqq")
-POD_PROXY_USER = os.environ.get("POD_PROXY_USER")  # e.g. "alpqgkmttz9dhl-64411961"
+POD_ID = os.environ.get("POD_ID", "hclm1ea4ll1i5c")
+POD_PROXY_USER = os.environ.get("POD_PROXY_USER")  # e.g. "hclm1ea4ll1i5c-64411720"
 SSH_USER = os.environ.get("POD_USER", "root")
 SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.ssh/id_ed25519"))
 LOG_PATH = os.environ.get("POD_LOG", "/workspace/pipeline.log")
@@ -63,8 +63,8 @@ GPU_POLL_SEC = float(os.environ.get("GPU_POLL_SEC", "2"))
 DISK_POLL_SEC = float(os.environ.get("DISK_POLL_SEC", "30"))
 SAVE_STEPS = int(os.environ.get("POD_SAVE_STEPS", "20"))  # used to predict next save
 # Tokens/s calculation: effective batch * max_seq_length ≈ tokens seen per step.
-# SFT default: grad_accum 64 * bsz 1 * max_seq_length 6144 = 393,216.
-EFFECTIVE_BATCH_TOKENS = int(os.environ.get("POD_TOKENS_PER_STEP", str(64 * 6144)))
+# SFT default: grad_accum 64 * bsz 1 * max_seq_length 4096 = 262,144.
+EFFECTIVE_BATCH_TOKENS = int(os.environ.get("POD_TOKENS_PER_STEP", str(64 * 4096)))
 
 _PORT_RE = re.compile(r"(\d+\.\d+\.\d+\.\d+):(\d+)->22\s*\(pub,tcp\)")
 
