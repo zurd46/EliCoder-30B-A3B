@@ -8,12 +8,13 @@ SFT-Quellen — reiner Agentik-Fokus (~115k Samples, nur Tool-Call-Signal):
   - NousResearch/hermes-function-calling-v1 (15k) — OpenAI-kompatible Function-Calls
   - princeton-nlp/SWE-bench_Verified         (500) — real repo patches (Struktur)
 
-DPO-Quellen:
-  - Vezora/Code-Preference-Pairs           (50k) — buggy vs. fixed
-  - jondurbin/py-dpo-v0.1                  (20k)
+DPO-Quellen — Agent-Conciseness (Mac-Speed via weniger Output-Tokens):
+  - Synthetisch aus xLAM (50k) — chosen: direkter Tool-Call,
+    rejected: Preamble-Prosa + Tool-Call oder falsche Tool-Argumente
 
-LongCtx:
-  - Synthetisch mit Python-Code als Haystack (statt Zufallswörter)
+LongCtx — Agent-Needle-in-Haystack:
+  - Synthetisch: 200+ Tool-Schemas als Haystack, Needle = Ziel-Tool,
+    Query verlangt korrekten Call mit dem Needle-Tool
 """
 from __future__ import annotations
 import sys
@@ -229,98 +230,180 @@ print(f"\nSFT total: {len(sft)} samples")
 sft.push_to_hub(f"{OWNER}/EliCoder-Dataset-SFT", private=True, token=TOK)
 
 
-# ── DPO ──────────────────────────────────────────────────────────────────────
+# ── DPO — Synthetic Agent-Conciseness ────────────────────────────────────────
+# Ziel: Modell lernt DIREKT mit <tool_call>-Block zu antworten, ohne Preamble.
+# Jedes Output-Token weniger = schnellere Agent-Loops auf Mac (M-Series Decode).
 
-def load_code_preference_pairs(n: int):
-    ds = load_dataset("Vezora/Code-Preference-Pairs", split="train", token=TOK).shuffle(seed=42)
+VERBOSE_PREAMBLES = [
+    "Of course! I'd be happy to help you with that. Let me think about which tool is best here.\n\n",
+    "Sure, I can help! Based on your request, I think the right approach is to call the following tool:\n\n",
+    "Great question! To accomplish this, I need to use a function call. Here is what I'll do:\n\n",
+    "I understand what you're asking. Let me walk you through my reasoning before making the call.\n"
+    "First, I identify the relevant function, then I prepare the arguments carefully.\n\n",
+    "Let me help you with that! I'll use the appropriate tool to handle your request:\n\n",
+    "Absolutely, I can assist. Let me break this down step-by-step before I invoke the function.\n"
+    "Step 1: Understand the goal.\nStep 2: Pick the right tool.\nStep 3: Fill in arguments.\n\n",
+    "Okay, so looking at your query, I believe the best way forward is to leverage a function call.\n"
+    "Here is my plan:\n\n",
+]
+
+
+def build_agent_dpo(n: int):
+    """Synthetic Agent-DPO aus xLAM — Concise-vs-Verbose Tool-Calls.
+
+    Prompt: Tool-Schema-Kontext + User-Query
+    chosen: direkter <tool_call>-Block (keine Prosa)
+    rejected: geschwätziger Preamble + exakt derselbe Tool-Call
+
+    Damit lernt DPO *nur* den Unterschied zwischen kurz und geschwätzig —
+    Korrektheit des Tool-Calls bleibt konstant. Der Conciseness-Effekt
+    wird isoliert trainiert.
+    """
+    import json as _json
+    ds = load_dataset("Salesforce/xlam-function-calling-60k", split="train", token=TOK).shuffle(seed=42)
     out = []
     for row in ds.select(range(min(n, len(ds)))):
-        prompt = row.get("prompt") or row.get("instruction") or row.get("input") or ""
-        chosen = row.get("chosen") or row.get("accepted") or row.get("fixed_code")
-        rejected = row.get("rejected") or row.get("bugged_code")
-        if prompt and chosen and rejected:
-            out.append({"prompt": prompt, "chosen": chosen, "rejected": rejected})
+        query = row.get("query") or ""
+        tools_raw = row.get("tools") or "[]"
+        answers_raw = row.get("answers") or "[]"
+        if not (query and tools_raw and answers_raw):
+            continue
+        try:
+            tools = _json.loads(tools_raw) if isinstance(tools_raw, str) else tools_raw
+            calls = _json.loads(answers_raw) if isinstance(answers_raw, str) else answers_raw
+        except Exception:
+            continue
+        if not calls:
+            continue
+
+        tc_blocks = "\n".join(
+            f"<tool_call>\n{_json.dumps(c, ensure_ascii=False)}\n</tool_call>" for c in calls
+        )
+        preamble = random.choice(VERBOSE_PREAMBLES)
+
+        prompt = (
+            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
+            "<tools>\n" + _json.dumps(tools, ensure_ascii=False) + "\n</tools>\n\n"
+            f"User: {query}\nAssistant:"
+        )
+
+        out.append({
+            "prompt":   prompt,
+            "chosen":   tc_blocks,
+            "rejected": preamble + tc_blocks,
+        })
     return Dataset.from_list(out)
 
 
-def load_py_dpo(n: int):
-    ds = load_dataset("jondurbin/py-dpo-v0.1", split="train", token=TOK).shuffle(seed=42)
-    out = []
-    for row in ds.select(range(min(n, len(ds)))):
-        out.append({"prompt": row["prompt"], "chosen": row["chosen"], "rejected": row["rejected"]})
-    return Dataset.from_list(out)
-
-
-print("\nloading DPO sources …")
-dpo_parts = []
-for fn, label, n in [(load_code_preference_pairs, "code-pref", 50_000),
-                     (load_py_dpo,                "py-dpo",    20_000)]:
-    try:
-        d = fn(n)
-        print(f"  {label}: {len(d)}")
-        dpo_parts.append(d)
-    except Exception as e:
-        print(f"  {label}: SKIPPED ({e})")
-
-dpo = concatenate_datasets(dpo_parts).shuffle(seed=42)
-print(f"\nDPO total: {len(dpo)}")
+print("\nbuilding Agent-DPO (synthetic concise-vs-verbose) …")
+dpo = build_agent_dpo(50_000).shuffle(seed=42)
+print(f"DPO total: {len(dpo)}")
 dpo.push_to_hub(f"{OWNER}/EliCoder-Dataset-DPO", private=True, token=TOK)
 
 
-# ── LongCtx — Python-Code als Haystack (statt Zufallswörter) ─────────────────
+# ── LongCtx — Agentisches Needle-in-Haystack über Tool-Schemas ───────────────
+# Realistischer Use-Case: Agent bekommt 200+ Tools (z.B. MCP mit vielen Servern)
+# und muss das richtige auswählen und korrekt aufrufen. Needle = gesuchtes Tool.
 
-def synth_long_ctx_code(n: int, lengths=(16_000, 32_000, 64_000, 128_000)):
-    """Needle-in-haystack mit Python-Code — realistischer als Zufallswörter."""
+def synth_long_ctx_agentic(n: int, lengths=(16_000, 32_000, 64_000, 128_000)):
+    """Needle-in-haystack mit Tool-Schemas — Agent-Navigation durch große Tool-Kataloge.
+
+    Kontext: Riesiges <tools>-Block mit N Schemas (Haystack).
+    Needle: Ein eindeutig benanntes Ziel-Tool irgendwo dazwischen.
+    Query: Fordert Aufruf des Needle-Tools mit gegebenen Argumenten.
+    Expected: Direkter <tool_call>-Block mit korrektem Namen + Argumenten.
+    """
+    import json as _json
     random.seed(123)
 
-    # Lade Python-Snippets als Haystack-Material
-    snippets = []
-    try:
-        snip_ds = load_dataset("nampdn-ai/tiny-codes", split="train", token=TOK)
-        snippets = [r.get("response", "")[:600] for r in snip_ds if r.get("response")][:8000]
-        print(f"  longctx filler: {len(snippets)} snippets from tiny-codes")
-    except Exception as e:
-        print(f"  longctx filler: tiny-codes SKIPPED ({e}), using fallback")
+    # Sammle reale Tool-Schemas aus xLAM als Haystack-Material.
+    print("  longctx: sammle Tool-Schemas aus xLAM …")
+    pool_ds = load_dataset("Salesforce/xlam-function-calling-60k",
+                           split="train", token=TOK).shuffle(seed=123)
+    tool_pool = []
+    for row in pool_ds:
+        try:
+            tools = _json.loads(row["tools"]) if isinstance(row["tools"], str) else row["tools"]
+            for t in tools:
+                if isinstance(t, dict) and t.get("name"):
+                    tool_pool.append(t)
+        except Exception:
+            continue
+        if len(tool_pool) >= 20_000:
+            break
+    # Deduplizieren nach Tool-Name (behalte erstes Vorkommen).
+    seen = set()
+    unique_pool = []
+    for t in tool_pool:
+        if t["name"] not in seen:
+            seen.add(t["name"])
+            unique_pool.append(t)
+    print(f"  longctx: {len(unique_pool)} unique Tool-Schemas im Pool")
 
-    if not snippets:
-        snippets = [
-            "def helper(x):\n    return x * 2\n",
-            "import os\nimport sys\nfrom pathlib import Path\n",
-            "class MyClass:\n    def __init__(self, val):\n        self.val = val\n",
-            "for i in range(10):\n    print(i)\n",
-            "def process(data: list) -> dict:\n    return {str(i): v for i, v in enumerate(data)}\n",
-            "if __name__ == '__main__':\n    main()\n",
-        ] * 2000
+    if len(unique_pool) < 50:
+        raise RuntimeError("Nicht genügend Tool-Schemas für LongCtx-Needle-Build")
 
     out = []
     for _ in range(n):
-        L = random.choice(lengths)
-        fn_name = f"target_{random.randint(10**6, 10**7)}"
-        return_val = str(random.randint(10**9, 10**10))
+        L_chars = random.choice(lengths) * 4  # ≈4 chars per token als grobe Heuristik
 
-        parts, total = [], 0
-        while total < L:
-            s = random.choice(snippets)
-            parts.append(s)
-            total += len(s)
+        # Needle: zufälliges Tool mit eindeutigem Namen aussuchen.
+        needle = random.choice(unique_pool)
+        needle_name = needle["name"]
 
-        needle = (f"\n\ndef {fn_name}() -> int:\n"
-                  f"    \"\"\"Returns the secret target value.\"\"\"\n"
-                  f"    return {return_val}\n\n")
-        idx = random.randint(max(1, len(parts) // 4), 3 * len(parts) // 4)
-        parts.insert(idx, needle)
+        # Haystack aufbauen: Tool-Schemas bis char-budget erreicht.
+        haystack, total = [], 0
+        while total < L_chars:
+            t = random.choice(unique_pool)
+            if t["name"] == needle_name:
+                continue  # Kollision mit Needle vermeiden
+            s = _json.dumps(t, ensure_ascii=False)
+            haystack.append(t)
+            total += len(s) + 2  # + trennung
 
-        code = "\n".join(parts)
+        # Needle irgendwo in die Mitte einfügen.
+        idx = random.randint(len(haystack) // 4, 3 * len(haystack) // 4)
+        haystack.insert(idx, needle)
+
+        # Synthetische Argumente aus Needle-Schema.
+        args = {}
+        params = needle.get("parameters", {}) or {}
+        props = params.get("properties", {}) if isinstance(params, dict) else {}
+        for pname, pspec in list(props.items())[:3]:  # max 3 Args
+            ptype = (pspec or {}).get("type", "string")
+            if ptype == "integer":
+                args[pname] = random.randint(1, 100)
+            elif ptype == "number":
+                args[pname] = round(random.uniform(1.0, 100.0), 2)
+            elif ptype == "boolean":
+                args[pname] = random.choice([True, False])
+            elif ptype == "array":
+                args[pname] = []
+            else:
+                args[pname] = f"value_{random.randint(1, 999)}"
+
+        tools_json = _json.dumps(haystack, ensure_ascii=False)
+        sys_msg = (
+            "You are a function-calling agent. Respond with tool calls only, no prose.\n"
+            f"<tools>\n{tools_json}\n</tools>"
+        )
+        user_msg = (
+            f"Call the `{needle_name}` function"
+            + (f" with these arguments: {_json.dumps(args, ensure_ascii=False)}." if args
+               else " (no arguments required).")
+        )
+        tool_call = {"name": needle_name, "arguments": args}
+        assistant_msg = f"<tool_call>\n{_json.dumps(tool_call, ensure_ascii=False)}\n</tool_call>"
+
         out.append(to_chatml([
-            {"role": "user",
-             "content": (f"CODEBASE:\n```python\n{code}\n```\n\n"
-                         f"What integer does `{fn_name}()` return? Answer with just the number.")},
-            {"role": "assistant", "content": return_val},
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": user_msg},
+            {"role": "assistant", "content": assistant_msg},
         ]))
     return Dataset.from_list(out)
 
 
-longctx = synth_long_ctx_code(6_000)
+longctx = synth_long_ctx_agentic(6_000)
 print(f"\nLongCtx total: {len(longctx)}")
 longctx.push_to_hub(f"{OWNER}/EliCoder-Dataset-LongCtx", private=True, token=TOK)
 

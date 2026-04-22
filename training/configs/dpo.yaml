@@ -4,8 +4,10 @@ adapter_repo: zurd46/EliCoder-30B-A3B-LoRA-SFT
 training:
   dataset: zurd46/EliCoder-Dataset-DPO
   split: train
+  # Agent-DPO: Prompts enthalten das volle <tools>-Schema (JSON) +
+  # Query. Tool-Schemas sind oft 1–2k Tokens.
   max_seq_length: 4096
-  max_prompt_length: 1024
+  max_prompt_length: 3072
   beta: 0.05
   num_train_epochs: 1
   per_device_train_batch_size: 1
