@@ -26,6 +26,8 @@ from trl import DPOTrainer, DPOConfig
 from peft import PeftModel
 from transformers.trainer_utils import get_last_checkpoint
 
+from _agent_eval import AgentEvalCallback
+
 PatchDPOTrainer()
 
 TOK = os.environ["HF_TOKEN"]
@@ -89,6 +91,7 @@ trainer = DPOTrainer(
     model=model, ref_model=None, args=args,
     train_dataset=ds, eval_dataset=eval_ds,
     tokenizer=tokenizer,
+    callbacks=[AgentEvalCallback(tokenizer)],
 )
 
 last_ckpt = get_last_checkpoint(str(CKPT))

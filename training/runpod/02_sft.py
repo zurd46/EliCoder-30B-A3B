@@ -31,6 +31,8 @@ from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
 from transformers.trainer_utils import get_last_checkpoint
 
+from _agent_eval import AgentEvalCallback
+
 TOK = os.environ["HF_TOKEN"]
 CFG = yaml.safe_load(Path("configs/sft.yaml").read_text())
 CKPT = checkpoint_dir("sft-phase-a")
@@ -134,6 +136,7 @@ trainer = SFTTrainer(
     model=model, tokenizer=tokenizer,
     train_dataset=ds, eval_dataset=eval_ds,
     args=args,
+    callbacks=[AgentEvalCallback(tokenizer)],
 )
 
 last_ckpt = get_last_checkpoint(str(CKPT))
