@@ -45,7 +45,7 @@ except ImportError:
 # a pod restart without any env tweaking. ENV overrides still take precedence.
 POD_ID = os.environ.get("POD_ID", "alpqgkmttz9dhl")
 SSH_USER = os.environ.get("POD_USER", "root")
-SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.runpod/ssh/RunPod-Key-Go"))
+SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.ssh/id_ed25519"))
 LOG_PATH = os.environ.get("POD_LOG", "/workspace/sft.log")
 CKPT_DIR = os.environ.get("POD_CKPT", "/workspace/checkpoints/sft-phase-a")
 WORKSPACE_PATH = os.environ.get("POD_WORKSPACE", "/workspace")

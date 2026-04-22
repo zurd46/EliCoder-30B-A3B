@@ -38,8 +38,7 @@ MAX_PER_SOURCE = {
     "nemotron_opencode":   15_000,
     "opencodereasoning":   30_000,
     "codefeedback":        30_000,
-    "self_oss_instruct":   25_000,
-    "commitpackft":        25_000,
+    "self_oss_instruct":   35_000,
     "magicoder_evol":      15_000,
     "swe_verified":           500,
     "agentic_cot":          5_000,
@@ -174,7 +173,7 @@ loaders = [
     (load_open_code_reasoning, "opencodereasoning"),
     (load_codefeedback,        "codefeedback"),
     (load_self_oss_instruct,   "self_oss_instruct"),
-    (load_commitpackft,        "commitpackft"),
+
     (load_magicoder_evol,      "magicoder_evol"),
     (load_swe_verified,        "swe_verified"),
     (load_agentic_cot,         "agentic_cot"),
