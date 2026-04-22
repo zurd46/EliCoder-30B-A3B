@@ -375,33 +375,55 @@ def log_tail_worker() -> None:
         if not STOP.is_set():
             time.sleep(3)
 
+# Utilization comes from `nvidia-smi dmon` instead of `--query-gpu=utilization.*`
+# because on H100/H100 NVL the snapshot-based query often returns 0 % between
+# CUDA-graph kernels even at full load. `dmon -c 2 -s u` runs for ~2 s and
+# reports SM% / MEM-bandwidth% averaged over a sampling window, which matches
+# what nvtop / Grafana show. Everything else stays on --query-gpu.
 NVIDIA_QUERY = ",".join([
-    "name", "utilization.gpu", "utilization.memory",
+    "name",
     "memory.used", "memory.total", "temperature.gpu",
     "power.draw", "power.limit", "clocks.sm",
 ])
 
 def gpu_poll_worker() -> None:
-    remote = f"nvidia-smi --query-gpu={NVIDIA_QUERY} --format=csv,noheader,nounits"
+    remote = (
+        f"nvidia-smi --query-gpu={NVIDIA_QUERY} --format=csv,noheader,nounits; "
+        f"echo '---'; "
+        f"nvidia-smi dmon -c 2 -s u"
+    )
     cmd = SSH_BASE + [remote]
     while not STOP.is_set():
         try:
             out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, timeout=20, text=True)
-            parts = [p.strip() for p in out.strip().splitlines()[0].split(",")]
-            if len(parts) >= 8:
+            blocks = out.split("---")
+            parts = [p.strip() for p in blocks[0].strip().splitlines()[0].split(",")]
+            if len(parts) >= 7:
                 GPU.name = parts[0]
-                GPU.util_gpu = int(float(parts[1]))
-                GPU.util_mem = int(float(parts[2]))
-                GPU.mem_used = int(float(parts[3]))
-                GPU.mem_total = int(float(parts[4]))
-                GPU.temp = int(float(parts[5]))
-                GPU.power = float(parts[6])
-                GPU.power_max = float(parts[7])
-                if len(parts) >= 9:
-                    try:
-                        GPU.sm_clock = int(float(parts[8]))
-                    except ValueError:
-                        GPU.sm_clock = 0
+                GPU.mem_used = int(float(parts[1]))
+                GPU.mem_total = int(float(parts[2]))
+                GPU.temp = int(float(parts[3]))
+                GPU.power = float(parts[4])
+                GPU.power_max = float(parts[5])
+                try:
+                    GPU.sm_clock = int(float(parts[6]))
+                except ValueError:
+                    GPU.sm_clock = 0
+                # dmon block: skip '#' header rows, take the last sample.
+                # Columns: gpu_idx, sm%, mem%, enc%, dec%, jpg%, ofa%
+                if len(blocks) >= 2:
+                    rows = [
+                        ln for ln in blocks[1].strip().splitlines()
+                        if ln.strip() and not ln.lstrip().startswith("#")
+                    ]
+                    if rows:
+                        cols = rows[-1].split()
+                        if len(cols) >= 3:
+                            try:
+                                GPU.util_gpu = int(cols[1])
+                                GPU.util_mem = int(cols[2])
+                            except ValueError:
+                                pass
                 GPU.last_poll = datetime.now()
                 GPU.alive = True
                 GPU.last_error = ""
