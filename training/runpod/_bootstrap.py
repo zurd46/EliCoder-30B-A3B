@@ -15,31 +15,29 @@ CHECKPOINT_ROOT = WORKSPACE / "checkpoints"
 CACHE_ROOT = WORKSPACE / "hf_cache"
 DEPS_MARKER = WORKSPACE / ".deps_installed"
 
-# PyTorch muss zuerst mit dem korrekten CUDA-Index installiert werden,
-# damit unsloth_zoo >=2026.4.8 funktioniert (braucht torch.int1 etc.).
-# CUDA 12.4 on RunPod-Image → torch 2.6 ist das Maximum. torch 2.6 pinnt strict
-# triton==3.2.0 (fehlt tl.make_tensor_descriptor → native_torch MoE fallback).
-# Flash Attention 2 kompensiert das teilweise (1.5–2× Speedup vs xformers).
+# PyTorch für CUDA 12.8 + H100. torch 2.8 zieht triton 3.3+ automatisch mit,
+# das aktiviert den schnellen unsloth_triton / grouped_mm MoE-Backend.
+# (Alter cu124-Pfad mit torch 2.6 + triton 3.2 war ~20× langsamer.)
 TORCH_PACKAGES = [
-    "torch==2.6.0+cu124",
-    "torchvision==0.21.0+cu124",
-    "torchaudio==2.6.0+cu124",
+    "torch==2.8.0+cu128",
+    "torchvision==0.23.0+cu128",
+    "torchaudio==2.8.0+cu128",
 ]
+TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 
-# Pre-built Flash-Attention-2 wheel für unsere exakte Version-Matrix:
-#   cu12.x · torch 2.6 · cp311 · cxx11abiFALSE · x86_64
-# Auf 30B-MoE die einzige sinnvolle Attention (FA3 existiert nicht für H100+BF16
-# stable im Unsloth-Pfad).
+# Flash-Attention-2 Wheel passend zu torch 2.8 + cu128 + cxx11abiTRUE (torch 2.8
+# default). Ohne dieses Wheel triggert `pip install flash-attn` einen 20-min
+# Source-Build mit nvcc — der hier prebuilt ist in <30 s installiert.
 FLASH_ATTN_WHEEL = (
     "https://github.com/Dao-AILab/flash-attention/releases/download/"
-    "v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-"
+    "v2.8.1/flash_attn-2.8.1+cu128torch2.8cxx11abiTRUE-"
     "cp311-cp311-linux_x86_64.whl"
 )
 
 PIP_PACKAGES = [
-    # Triton EXPLIZIT pinnen — ohne Pin zieht pip-resolver manchmal 3.3+ das
-    # mit torch 2.6's _inductor inkompatibel ist (AttrsDescriptor removed).
-    "triton==3.2.0",
+    # Triton NICHT pinnen — torch 2.8 bringt die passende Version (≥3.3, mit
+    # tl.make_tensor_descriptor-API) als strikte Dependency. Ein Pin würde
+    # entweder ignoriert oder zu Resolver-Konflikten führen.
     "torchao==0.13.0",
     "unsloth @ git+https://github.com/unslothai/unsloth.git",
     "unsloth_zoo",
@@ -118,6 +116,74 @@ def _backport_torch_compat() -> None:
     print("torch compat: backported nn.Module.set_submodule (torch <2.5)")
 
 
+def _verify_stack() -> None:
+    """Printet eine klare Stack-Summary am Start jeder Phase — macht sofort
+    sichtbar ob die kritische Kombination (torch 2.8 + triton 3.3+ TMA + FA2)
+    tatsächlich geladen wurde. Rote Flaggen zeigen wir mit Warn-Prefix,
+    damit sie im Log nicht übersehen werden.
+    """
+    import importlib
+    rows = []
+
+    # torch
+    try:
+        import torch
+        t_ver = torch.__version__
+        t_cuda = getattr(torch.version, "cuda", None)
+        ok = t_ver >= "2.7"
+        rows.append((("✓" if ok else "⚠"), "torch", f"{t_ver}  (CUDA rt: {t_cuda})",
+                     "≥2.7 für unsloth_triton MoE-Kernel"))
+    except ImportError:
+        rows.append(("✗", "torch", "NOT INSTALLED", "Pipeline wird crashen"))
+
+    # triton
+    try:
+        import triton
+        from triton import language as tl
+        has_tma = hasattr(tl, "make_tensor_descriptor")
+        rows.append((("✓" if has_tma else "⚠"), "triton",
+                     f"{triton.__version__}  TMA={'yes' if has_tma else 'NO'}",
+                     "TMA nötig für schnellen MoE-Kernel"))
+    except ImportError:
+        rows.append(("✗", "triton", "NOT INSTALLED", ""))
+
+    # flash-attn
+    try:
+        import flash_attn
+        rows.append(("✓", "flash_attn", flash_attn.__version__,
+                     "Attention-Speedup vs. xformers"))
+    except ImportError:
+        rows.append(("⚠", "flash_attn", "NOT INSTALLED", "fällt auf xformers zurück (langsamer)"))
+
+    # unsloth + unsloth_zoo
+    for pkg in ("unsloth", "unsloth_zoo"):
+        try:
+            mod = importlib.import_module(pkg)
+            ver = getattr(mod, "__version__", "unknown")
+            rows.append(("✓", pkg, ver, ""))
+        except ImportError:
+            rows.append(("✗", pkg, "NOT INSTALLED", "Pipeline wird crashen"))
+
+    # transformers + trl + peft (häufige Version-Konflikte)
+    for pkg in ("transformers", "trl", "peft", "accelerate", "bitsandbytes"):
+        try:
+            mod = importlib.import_module(pkg)
+            ver = getattr(mod, "__version__", "unknown")
+            rows.append(("✓", pkg, ver, ""))
+        except ImportError:
+            rows.append(("✗", pkg, "NOT INSTALLED", ""))
+
+    w_pkg = max(len(r[1]) for r in rows)
+    w_ver = max(len(r[2]) for r in rows)
+    print("┌── STACK SUMMARY ───────────────────────────────────────────────")
+    for flag, pkg, ver, note in rows:
+        line = f"│ {flag}  {pkg:<{w_pkg}}  {ver:<{w_ver}}"
+        if note:
+            line += f"   {note}"
+        print(line)
+    print("└───────────────────────────────────────────────────────────────")
+
+
 def _configure_moe_backend() -> None:
     """Pick an Unsloth MoE backend compatible with the installed triton.
 
@@ -178,16 +244,20 @@ def bootstrap(*, install: bool = True) -> Path:
 
     if install and not DEPS_MARKER.exists():
         print("installing pip deps (once per pod) …")
-        # 1. PyTorch zuerst — RunPod-Image hat 2.4.1, unsloth_zoo braucht >=2.6
+        # 1. PyTorch zuerst via CUDA-Index — TORCH_INDEX_URL ist auf cu128 gesetzt,
+        #    damit torch 2.8 + triton 3.3+ (mit TMA) kommt. Auf älteren Images
+        #    mit cu124 würde das fehlschlagen — dann muss der Pod neu mit cu128
+        #    oder höher aufgebaut werden.
         subprocess.run(
             [
                 sys.executable, "-m", "pip", "install", "-q",
-                "--index-url", "https://download.pytorch.org/whl/cu124",
+                "--index-url", TORCH_INDEX_URL,
                 *TORCH_PACKAGES,
             ],
             check=True,
         )
-        # 2. Restliche Packages
+        # 2. Restliche Packages (inkl. flash-attn wheel). triton wird NICHT
+        #    gepinnt — torch 2.8 zieht die passende Version automatisch mit.
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", *PIP_PACKAGES],
             check=True,
@@ -208,6 +278,9 @@ def bootstrap(*, install: bool = True) -> Path:
     # Patch early: greift bevor transformers/unsloth importiert werden.
     _backport_torch_compat()
     _configure_moe_backend()
+    # Stack-Summary printet nach dem MoE-Backend-Pick — zeigt sofort ob
+    # alles stimmt (torch 2.8 + triton TMA + FA2 usw).
+    _verify_stack()
     return training
 
 
