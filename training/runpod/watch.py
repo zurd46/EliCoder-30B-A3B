@@ -462,9 +462,15 @@ def header_panel() -> Panel:
 def metrics_panel() -> Panel:
     t = Table.grid(padding=(0, 2))
     t.add_column(style="bold magenta"); t.add_column()
-    t.add_row("Loss", f"{TRAIN.last_loss:.4f}" if TRAIN.last_loss is not None else "[dim]—[/dim]")
-    t.add_row("LR", f"{TRAIN.last_lr:.2e}" if TRAIN.last_lr is not None else "[dim]—[/dim]")
-    t.add_row("Grad-norm", f"{TRAIN.last_grad_norm:.3f}" if TRAIN.last_grad_norm is not None else "[dim]—[/dim]")
+    # If we're in a non-training phase, show phase info instead of empty metrics
+    is_training_phase = TRAIN.phase in ("Training", "SFT Training", "DPO Training", "LongCtx Training")
+    if not is_training_phase and TRAIN.last_loss is None:
+        t.add_row("Phase", TRAIN.phase or "[dim]starting…[/dim]")
+        t.add_row("Metrics", "[dim]will appear once training begins[/dim]")
+    else:
+        t.add_row("Loss", f"{TRAIN.last_loss:.4f}" if TRAIN.last_loss is not None else "[dim]—[/dim]")
+        t.add_row("LR", f"{TRAIN.last_lr:.2e}" if TRAIN.last_lr is not None else "[dim]—[/dim]")
+        t.add_row("Grad-norm", f"{TRAIN.last_grad_norm:.3f}" if TRAIN.last_grad_norm is not None else "[dim]—[/dim]")
     t.add_row("", "")  # Separator
     if TRAIN.last_eval_loss is not None:
         trend = ""
@@ -477,9 +483,8 @@ def metrics_panel() -> Panel:
         if TRAIN.last_eval_runtime:
             t.add_row("Eval time", f"{TRAIN.last_eval_runtime:.1f}s")
     else:
-        t.add_row("Eval", "[dim]starts at step 20[/dim]")
+        t.add_row("Eval", "[dim]starts at step 20[/dim]" if is_training_phase else "[dim]—[/dim]")
     if TRAIN.wandb_url:
-        # Shorten the url for display, keep full in OSC-8 hyperlink so cmd-click works
         short = TRAIN.wandb_url.split("/runs/", 1)[-1][:24]
         t.add_row("WandB", f"[link={TRAIN.wandb_url}]…/runs/{short}[/link]")
     return Panel(t, title="[bold]Metrics[/bold]", border_style="magenta")
@@ -542,7 +547,8 @@ def loss_panel() -> Panel:
         t.add_row(spark)
         t.add_row(summary)
     if not has_any:
-        t.add_row("[dim]no training metrics yet — appears from step 5 onward (logging_steps)[/dim]")
+        phase_hint = f" — current phase: {TRAIN.phase}" if TRAIN.phase else ""
+        t.add_row(f"[dim]no training metrics yet{phase_hint}. Loss & grad-norm appear once SFT/DPO/LongCtx training starts.[/dim]")
     return Panel(t, title="[bold]Loss & Grad-Norm[/bold]", border_style="green")
 
 def cost_panel() -> Panel:
