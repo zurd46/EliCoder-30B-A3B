@@ -43,8 +43,12 @@ def _parse_tool_call(text: str) -> Optional[dict]:
 class AgentEvalCallback(TrainerCallback):
     """Periodische Agent-Qualitäts-Eval auf xLAM-Held-out-Samples."""
 
-    def __init__(self, tokenizer, n_samples: int = 50, seed: int = 999,
-                 max_new_tokens: int = 128, max_prompt_tokens: int = 3072):
+    def __init__(self, tokenizer, n_samples: int = 20, seed: int = 999,
+                 max_new_tokens: int = 96, max_prompt_tokens: int = 2048):
+        # Defaults bewusst knapp gehalten: wir laufen WÄHREND Training,
+        # wo VRAM bereits ~90% belegt ist (weights + optimizer + grads).
+        # 50 Samples × 128 max_new_tokens × 3k prompt = OOM auf H100-NVL.
+        # 20×96×2k passt mit ~2 GB Luftpolster nach torch.cuda.empty_cache().
         self.tokenizer = tokenizer
         self.n_samples = n_samples
         self.max_new_tokens = max_new_tokens
@@ -94,6 +98,12 @@ class AgentEvalCallback(TrainerCallback):
         model.eval()
         device = next(model.parameters()).device
 
+        # Vor Eval so viel VRAM wie möglich freigeben — das Training hält
+        # KV-Caches, Gradienten-Buffer etc. die während generate() nicht
+        # gebraucht werden. Ohne das OOM'ed generate() zuverlässig
+        # (256 MB extra-Allokation schlägt auf 86 MB freien VRAM fehl).
+        torch.cuda.empty_cache()
+
         with torch.no_grad():
             for s in samples:
                 sys_msg = (
@@ -141,6 +151,11 @@ class AgentEvalCallback(TrainerCallback):
                     gold_name = s["gold"].get("name") if isinstance(s["gold"], dict) else None
                     if gold_name and parsed.get("name") == gold_name:
                         name_ok += 1
+
+                # Per-sample cleanup — generate() allokiert KV-cache on-the-fly,
+                # wenn wir den nicht freigeben, wächst VRAM über 20 samples hinweg.
+                del out, gen, inputs
+                torch.cuda.empty_cache()
 
         n = len(samples)
         metrics = {
