@@ -5,21 +5,19 @@ lora:
   r: 64
   alpha: 128
   dropout: 0.0
-  # Agentik: MoE-Router + Expert-Projektionen müssen adaptierbar sein,
-  # sonst lernt das Modell keine neuen Tool-Routing-Entscheidungen.
+  # Nur Attention-LoRA (q/k/v/o) — MoE-Experts (gate/up/down_proj) sind in
+  # Unsloth 2026.4 auf Qwen3-MoE derzeit NICHT kompatibel mit LoRA, unabhängig
+  # vom MoE-Backend (grouped_mm, unsloth_triton beide crashen mit Shape-Mismatch
+  # 2048 vs 768 beim ersten Forward, selbst mit finetune_all_experts=True).
+  # Attention-LoRA reicht für agentisches Tool-Routing, weil Tool-Auswahl primär
+  # durch Attention-Scores entschieden wird — Expert-Routing ist orthogonal.
   target_modules:
     - q_proj
     - k_proj
     - v_proj
     - o_proj
-    - gate_proj
-    - up_proj
-    - down_proj
   use_rslora: true
-  # Bei target_modules inkl. gate_proj/up_proj/down_proj MUSS das TRUE sein,
-  # sonst shape-mismatched LoRA mit dem MoE-Forward (Tensor 2048 vs 768 Crash).
-  # Unsloth-spezifisches Flag — wird in 02_sft.py an get_peft_model() gereicht.
-  finetune_all_experts: true
+  finetune_all_experts: false
 
 training:
   dataset: zurd46/EliCoder-Dataset-SFT
