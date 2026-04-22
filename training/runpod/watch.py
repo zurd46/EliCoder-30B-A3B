@@ -51,7 +51,7 @@ except ImportError:
 #      connect as POD_PROXY_USER@ssh.runpod.io. Needed when the pod has no
 #      public-TCP SSH mapping (the proxy requires a PTY — we pass -tt).
 # POD_ID is the stable identifier for direct-TCP auto-detection.
-POD_ID = os.environ.get("POD_ID", "alpqgkmttz9dhl")
+POD_ID = os.environ.get("POD_ID", "3xc1b6nzhkgmqq")
 POD_PROXY_USER = os.environ.get("POD_PROXY_USER")  # e.g. "alpqgkmttz9dhl-64411961"
 SSH_USER = os.environ.get("POD_USER", "root")
 SSH_KEY = os.environ.get("POD_KEY", os.path.expanduser("~/.ssh/id_ed25519"))
