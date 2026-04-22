@@ -151,12 +151,6 @@ def bootstrap(*, install: bool = True) -> Path:
     CACHE_ROOT.mkdir(parents=True, exist_ok=True)
 
     if install and not DEPS_MARKER.exists():
-        print("pinning torchao (torch.int1 conflict fix) …")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q",
-             "--force-reinstall", "--no-deps", *PIP_PINS_PRE],
-            check=True,
-        )
         print("installing pip deps (once per pod) …")
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-q", *PIP_PACKAGES],
