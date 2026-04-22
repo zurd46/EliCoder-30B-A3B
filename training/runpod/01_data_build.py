@@ -6,10 +6,8 @@ SFT-Quellen (Priorität: einzigartig + verifiziert):
   - nvidia/OpenCodeReasoning-2             (30k) — Chain-of-Thought Python
   - m-a-p/CodeFeedback-Filtered-Instruction (30k) — execution-verified, 2024
   - bigcode/self-oss-instruct-sc2-exec-filter-50k (25k) — OSS-inspired + verified
-  - bigcode/commitpackft                   (25k) — echte GitHub-Commits, einzigartig
-  - ise-uiuc/Magicoder-Evol-Instruct-110K  (15k)
+  - ise-uiuc/Magicoder-Evol-Instruct-110K  (20k)
   - princeton-nlp/SWE-bench_Verified        (500) — real repo patches
-  - AlicanKiraz0/Agentic-Chain-of-Thought  (5k)
 
 DPO-Quellen:
   - Vezora/Code-Preference-Pairs           (50k) — buggy vs. fixed
@@ -39,9 +37,8 @@ MAX_PER_SOURCE = {
     "opencodereasoning":   30_000,
     "codefeedback":        30_000,
     "self_oss_instruct":   35_000,
-    "magicoder_evol":      15_000,
-    "swe_verified":           500,
     "magicoder_evol":      20_000,
+    "swe_verified":           500,
 }
 
 
@@ -102,28 +99,6 @@ def load_self_oss_instruct(n: int):
                 {"role": "user", "content": inst},
                 {"role": "assistant", "content": resp},
             ]))
-    return Dataset.from_list(out)
-
-
-def load_commitpackft(n: int):
-    """Real GitHub commits — highly unique, teaches code patching."""
-    ds = load_dataset("bigcode/commitpackft", "python", split="train", token=TOK, trust_remote_code=True).shuffle(seed=42)
-    out = []
-    for row in ds.select(range(min(n, len(ds)))):
-        old = row.get("old_contents") or ""
-        new = row.get("new_contents") or ""
-        msg = row.get("subject") or row.get("message") or ""
-        # skip trivial or very long diffs
-        if not (old and new and msg) or len(old) > 3000 or len(new) > 3000:
-            continue
-        out.append(to_chatml([
-            {"role": "user",
-             "content": f"Apply this change to the Python code:\n\n{msg}\n\n```python\n{old}\n```"},
-            {"role": "assistant",
-             "content": f"```python\n{new}\n```"},
-        ]))
-        if len(out) >= n:
-            break
     return Dataset.from_list(out)
 
 
